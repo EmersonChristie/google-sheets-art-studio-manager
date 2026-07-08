@@ -1,0 +1,56 @@
+<script>
+  const FormTracking = {
+    baselines: {},
+    boundForms: {},
+    fieldIds: [],
+
+    bind(fields, onDirtyChange) {
+      this.fieldIds = fields.map((field) => `field-${field.key}`);
+      this.baselines.edit = this.serialize_(this.fieldIds);
+
+      if (this.boundForms.edit) {
+        onDirtyChange(false);
+        return;
+      }
+
+      this.boundForms.edit = true;
+
+      this.fieldIds.forEach((fieldId) => {
+        const element = document.getElementById(fieldId);
+
+        if (!element) {
+          return;
+        }
+
+        const handleChange = () => {
+          onDirtyChange(this.isDirty());
+        };
+
+        element.addEventListener('input', handleChange);
+        element.addEventListener('change', handleChange);
+      });
+    },
+
+    resetBaseline(fields) {
+      this.fieldIds = fields.map((field) => `field-${field.key}`);
+      this.baselines.edit = this.serialize_(this.fieldIds);
+    },
+
+    isDirty() {
+      if (!this.fieldIds.length || !this.baselines.edit) {
+        return false;
+      }
+
+      return this.serialize_(this.fieldIds) !== this.baselines.edit;
+    },
+
+    serialize_(fieldIds) {
+      return JSON.stringify(
+        fieldIds.map((fieldId) => {
+          const element = document.getElementById(fieldId);
+          return element ? element.value : '';
+        })
+      );
+    }
+  };
+</script>

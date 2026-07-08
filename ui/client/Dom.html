@@ -1,0 +1,35 @@
+<script>
+  function getValue(id) {
+    return document.getElementById(id)?.value.trim() || '';
+  }
+
+  function getNumericValue(id) {
+    const value = getValue(id);
+
+    if (!value) {
+      return '';
+    }
+
+    const num = Number(value);
+
+    return Number.isFinite(num) ? String(num) : '';
+  }
+
+  function setValue(id, value) {
+    const element = document.getElementById(id);
+    if (element) {
+      element.value = value || '';
+    }
+  }
+
+  function setStatus(id, message) {
+    const element = document.getElementById(id);
+    if (element) {
+      element.textContent = message || '';
+    }
+  }
+
+  function setText(id, message) {
+    setStatus(id, message);
+  }
+</script>

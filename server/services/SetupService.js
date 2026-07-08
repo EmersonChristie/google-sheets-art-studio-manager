@@ -1,3 +1,5 @@
+const ORGANIZATION_REQUIRED_FIELDS = ['artistName'];
+
 const SETUP_KEYS = [
   'artistName',
   'websiteUrl',
@@ -5,6 +7,17 @@ const SETUP_KEYS = [
   'cloudinaryUploadPreset',
   'deployHookUrl'
 ];
+
+/**
+ * @returns {boolean}
+ */
+function isOrganizationConfigured() {
+  const setup = getSetup();
+
+  return ORGANIZATION_REQUIRED_FIELDS.every((key) =>
+    isNonEmptyString(setup[key])
+  );
+}
 
 function getSetup() {
   const props = PropertiesService.getDocumentProperties();
@@ -21,6 +34,10 @@ function saveSetup(settings) {
   SETUP_KEYS.forEach((key) => {
     props.setProperty(key, String(settings[key] || '').trim());
   });
+
+  if (isOrganizationConfigured()) {
+    ensureWorkspaceSheets();
+  }
 
   return { message: 'Setup saved.' };
 }

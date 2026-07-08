@@ -7,31 +7,47 @@
 
   <body>
     <main class="app-shell">
-      <header class="app-header">
-        <div>
-          <p class="eyebrow">Artist Website</p>
-          <h1>Studio Manager</h1>
+      <header id="shell-header" class="shell-header">
+        <div class="shell-header__top">
+          <button id="back-button" class="button-back" type="button" hidden>Back</button>
+          <button id="refresh-button" class="button-ghost" type="button" hidden>Refresh</button>
         </div>
+        <p class="eyebrow" id="module-eyebrow">Studio Manager</p>
+        <h1 id="page-title">Dashboard</h1>
       </header>
 
-      <nav class="tabs">
-        <button class="tab-button" data-screen="setup">Setup</button>
-        <button class="tab-button" data-screen="artwork">Artwork</button>
-      </nav>
+      <section id="content-root" class="content-root"></section>
+      <?!= include('ui/views/setup/SetupWizard'); ?>
 
-      <section id="screen-setup" class="screen">
-        <?!= include('ui/ScreenSetup'); ?>
-      </section>
+      <footer id="shell-footer" class="shell-footer" hidden>
+        <button id="cancel-button" class="button-secondary" type="button">Cancel</button>
+        <button
+          id="save-button"
+          class="button-primary button-primary--inline"
+          type="button"
+          hidden
+        >
+          Save
+        </button>
+      </footer>
 
-      <section id="screen-artwork" class="screen">
-        <?!= include('ui/ScreenArtwork'); ?>
-      </section>
+      <div id="status-area" class="status-area"></div>
     </main>
 
+    <div id="toast-root" class="toast-root" aria-live="polite"></div>
+
     <script>
-      window.APP_INITIAL_SCREEN = "<?= initialScreen ?>";
+      window.APP_BOOTSTRAP = <?!= bootstrapJson ?>;
     </script>
 
-    <?!= include('ui/shared/ClientJs'); ?>
+    <?!= include('ui/client/Dom'); ?>
+    <?!= include('ui/client/Toast'); ?>
+    <?!= include('ui/client/State'); ?>
+    <?!= include('ui/client/FormTracking'); ?>
+    <?!= include('ui/client/Forms'); ?>
+    <?!= include('ui/client/SelectionPoller'); ?>
+    <?!= include('ui/client/Router'); ?>
+    <?!= include('ui/client/Actions'); ?>
+    <?!= include('ui/client/App'); ?>
   </body>
 </html>

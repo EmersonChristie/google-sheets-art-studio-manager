@@ -1,0 +1,101 @@
+<script>
+  const AppStore = {
+    bootstrap: null,
+    page: 'dashboard',
+    selectedRow: null,
+    editRecord: null,
+    bulkContext: null,
+    formMode: 'add',
+    pinToDashboard: false,
+    lastSelectionSignature: '',
+    pinnedPages: ['add', 'setup', 'search', 'filters', 'import', 'export'],
+
+    init(bootstrap) {
+      this.bootstrap = bootstrap;
+      this.pinToDashboard = false;
+      this.applyBootstrap_(bootstrap);
+      this.lastSelectionSignature = this.getSelectionSignature_(bootstrap.selection);
+    },
+
+    setBootstrap(bootstrap) {
+      this.bootstrap = bootstrap;
+      this.pinToDashboard = false;
+      this.applyBootstrap_(bootstrap);
+      this.lastSelectionSignature = this.getSelectionSignature_(bootstrap.selection);
+    },
+
+    applyBootstrap_(bootstrap) {
+      this.page = bootstrap.page || 'dashboard';
+      this.applySelection_(bootstrap.selection);
+    },
+
+    applySelection_(selection) {
+      if (!selection) {
+        this.selectedRow = null;
+        this.editRecord = null;
+        this.bulkContext = null;
+        this.formMode = 'add';
+        return;
+      }
+
+      if (selection.page === 'edit') {
+        this.selectedRow = selection.rowNumber;
+        this.editRecord = selection.record;
+        this.bulkContext = null;
+        this.formMode = 'edit';
+        return;
+      }
+
+      if (selection.page === 'bulk') {
+        this.selectedRow = null;
+        this.editRecord = null;
+        this.bulkContext = selection;
+        this.formMode = 'add';
+        return;
+      }
+
+      this.selectedRow = null;
+      this.editRecord = null;
+      this.bulkContext = null;
+      this.formMode = 'add';
+    },
+
+    getSelectionSignature_(selection) {
+      if (!selection || !selection.rowNumbers) {
+        return '';
+      }
+
+      return selection.rowNumbers.slice().sort((a, b) => a - b).join(',');
+    },
+
+    isSetupComplete() {
+      return Boolean(this.bootstrap?.isSetupComplete);
+    },
+
+    getModule() {
+      return this.bootstrap.module;
+    },
+
+    goToDashboard() {
+      this.pinToDashboard = true;
+      this.page = 'dashboard';
+    },
+
+    goToPage(page) {
+      this.pinToDashboard = false;
+      this.page = page;
+    },
+
+    shouldBlockPollNavigation_() {
+      if (this.pinnedPages.includes(this.page)) {
+        return true;
+      }
+
+      if (this.page === 'edit' && FormTracking.isDirty()) {
+        return true;
+      }
+
+      return false;
+    }
+  };
+</script>

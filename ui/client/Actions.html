@@ -1,0 +1,174 @@
+<script>
+  const SETUP_FIELDS = [
+    'artistName',
+    'websiteUrl',
+    'cloudinaryCloudName',
+    'cloudinaryUploadPreset',
+    'deployHookUrl'
+  ];
+
+  const Actions = {
+    refreshContext() {
+      google.script.run
+        .withSuccessHandler((bootstrap) => {
+          AppStore.setBootstrap(bootstrap);
+          Router.render();
+        })
+        .withFailureHandler((error) => {
+          Toast.show(error.message, 'error');
+        })
+        .refreshSidebarContext();
+    },
+
+    openEditFromDashboard() {
+      const module = AppStore.getModule();
+
+      if (!module || module.id === 'settings') {
+        return;
+      }
+
+      google.script.run
+        .withSuccessHandler((context) => {
+          if (!context.hasSelection) {
+            AppStore.editRecord = context;
+            AppStore.manualDashboard = false;
+            AppStore.goToPage('edit-empty');
+          } else {
+            AppStore.selectedRow = context.rowNumber;
+            AppStore.editRecord = context.record;
+            AppStore.formMode = 'edit';
+            AppStore.manualDashboard = false;
+            AppStore.goToPage('edit');
+          }
+
+          Router.render();
+        })
+        .withFailureHandler((error) => {
+          Toast.show(error.message, 'error');
+        })
+        .getEditRecordContext(module.id);
+    },
+
+    openBulkFromDashboard() {
+      const module = AppStore.getModule();
+
+      if (!module || module.id === 'settings') {
+        return;
+      }
+
+      google.script.run
+        .withSuccessHandler((context) => {
+          AppStore.bulkContext = context;
+          AppStore.manualDashboard = false;
+
+          if (context.selectionCount < 2) {
+            AppStore.goToPage('bulk-empty');
+          } else {
+            AppStore.goToPage('bulk');
+          }
+
+          Router.render();
+        })
+        .withFailureHandler((error) => {
+          Toast.show(error.message, 'error');
+        })
+        .getBulkRecordContext(module.id);
+    },
+
+    saveCurrentForm() {
+      const module = AppStore.getModule();
+      const fields = AppStore.bootstrap.formFields;
+      const record = Forms.getFormData(fields);
+      const validationError = Forms.validateForm(fields, record);
+
+      if (validationError) {
+        Toast.show(validationError, 'error');
+        return;
+      }
+
+      if (AppStore.formMode === 'edit' && AppStore.selectedRow) {
+        this.setLoading_(true);
+
+        google.script.run
+          .withSuccessHandler((response) => {
+            this.setLoading_(false);
+            Toast.show(response.message, 'success');
+            this.refreshAfterEditSave_();
+          })
+          .withFailureHandler((error) => {
+            this.setLoading_(false);
+            Toast.show(error.message, 'error');
+          })
+          .updateModuleRecord(module.id, AppStore.selectedRow, record);
+
+        return;
+      }
+
+      this.setLoading_(true);
+
+      google.script.run
+        .withSuccessHandler((response) => {
+          this.setLoading_(false);
+          Toast.show(response.message, 'success');
+          this.refreshContextAndDashboard_();
+        })
+        .withFailureHandler((error) => {
+          this.setLoading_(false);
+          Toast.show(error.message, 'error');
+        })
+        .saveModuleRecord(module.id, record);
+    },
+
+    refreshAfterEditSave_() {
+      google.script.run
+        .withSuccessHandler((bootstrap) => {
+          AppStore.setBootstrap(bootstrap);
+          Router.render();
+        })
+        .refreshSidebarContext();
+    },
+
+    refreshContextAndDashboard_() {
+      google.script.run
+        .withSuccessHandler((bootstrap) => {
+          AppStore.setBootstrap(bootstrap);
+          AppStore.goToDashboard();
+          Router.render();
+        })
+        .refreshSidebarContext();
+    },
+
+    setLoading_(isLoading) {
+      const saveButton = document.getElementById('save-button');
+      saveButton.disabled = isLoading;
+      saveButton.textContent = isLoading ? 'Saving...' : 'Save';
+      document.getElementById('status-area').textContent = isLoading ? 'Saving...' : '';
+    }
+  };
+
+  function loadSetup() {
+    google.script.run
+      .withSuccessHandler((settings) => {
+        SETUP_FIELDS.forEach((field) => setValue(field, settings[field]));
+      })
+      .withFailureHandler((error) => setStatus('setupStatus', error.message))
+      .getSetup();
+  }
+
+  function saveSetup() {
+    setStatus('setupStatus', 'Saving...');
+
+    const settings = SETUP_FIELDS.reduce((acc, field) => {
+      acc[field] = getValue(field);
+      return acc;
+    }, {});
+
+    google.script.run
+      .withSuccessHandler((response) => {
+        setStatus('setupStatus', response.message);
+        Router.refreshAfterSetup();
+      })
+      .withFailureHandler((error) => setStatus('setupStatus', error.message))
+      .saveSetup(settings);
+  }
+</script>

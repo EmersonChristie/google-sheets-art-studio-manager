@@ -1,0 +1,216 @@
+<script>
+  const Forms = {
+    renderDashboard(root) {
+      const module = AppStore.getModule();
+
+      if (!module) {
+        root.innerHTML = this.renderUnsupported_();
+        return;
+      }
+
+      if (AppStore.bootstrap.isSettingsModule) {
+        root.innerHTML = this.renderSettingsDashboard_();
+        return;
+      }
+
+      const utilities = (AppStore.bootstrap.utilityLabels || [])
+        .map(
+          (utility) =>
+            `<button type="button" class="action-button action-button--utility" data-page="${utility.id}">${utility.label}</button>`
+        )
+        .join('');
+
+      root.innerHTML = `
+        <div class="dashboard">
+          <p class="record-count">${AppStore.bootstrap.recordCount} Records</p>
+          <p class="status">Check rows in the Select column — the sidebar updates automatically.</p>
+
+          <div class="action-group">
+            <button type="button" class="action-button action-button--primary" data-page="add">
+              + ${module.actions.add}
+            </button>
+            <button type="button" class="action-button" data-page="edit">
+              ${module.actions.edit}
+            </button>
+            <button type="button" class="action-button" data-page="bulk">
+              ${module.actions.bulk}
+            </button>
+          </div>
+
+          <div class="utility-group">
+            <p class="section-label">Utilities</p>
+            ${utilities}
+          </div>
+        </div>
+      `;
+
+      root.querySelectorAll('[data-page]').forEach((button) => {
+        button.addEventListener('click', () => {
+          Router.openPage(button.dataset.page);
+        });
+      });
+    },
+
+    renderSettingsDashboard_() {
+      return `
+        <div class="dashboard">
+          <p class="record-count">Organization settings</p>
+          <div class="action-group">
+            <button type="button" class="action-button action-button--primary" data-page="setup">
+              Open Setup Wizard
+            </button>
+          </div>
+        </div>
+      `;
+    },
+
+    renderUnsupported_() {
+      return `
+        <div class="card card--message">
+          <h2>Unsupported Sheet</h2>
+          <p>This sheet is not supported yet. Switch to Artworks, Contacts, or Collections.</p>
+        </div>
+      `;
+    },
+
+    renderMessagePage(title, message) {
+      return `
+        <div class="card card--message">
+          <h2>${title}</h2>
+          <p>${message}</p>
+          <button type="button" class="action-button" data-page="dashboard">Back to Dashboard</button>
+        </div>
+      `;
+    },
+
+    renderForm(fields, record) {
+      const values = record || {};
+
+      return `
+        <form id="record-form" class="record-form">
+          ${fields
+            .map((field) => {
+              const fieldId = `field-${field.key}`;
+              const value = values[field.key] ?? '';
+              const required = field.required ? 'required' : '';
+
+              if (field.type === 'textarea') {
+                return `
+                  <div class="field">
+                    <label for="${fieldId}">${field.label}</label>
+                    <textarea id="${fieldId}" data-key="${field.key}" ${required}>${value}</textarea>
+                  </div>
+                `;
+              }
+
+              if (field.type === 'select') {
+                const options = (field.options || [])
+                  .map(
+                    (option) =>
+                      `<option ${String(value) === option ? 'selected' : ''}>${option}</option>`
+                  )
+                  .join('');
+
+                return `
+                  <div class="field">
+                    <label for="${fieldId}">${field.label}</label>
+                    <select id="${fieldId}" data-key="${field.key}" ${required}>${options}</select>
+                  </div>
+                `;
+              }
+
+              const inputType =
+                field.type === 'number' ? 'number' : field.type === 'email' ? 'email' : 'text';
+
+              return `
+                <div class="field">
+                  <label for="${fieldId}">${field.label}</label>
+                  <input
+                    id="${fieldId}"
+                    data-key="${field.key}"
+                    type="${inputType}"
+                    value="${value}"
+                    ${field.type === 'number' ? 'inputmode="decimal" step="any"' : ''}
+                    ${required}
+                  >
+                </div>
+              `;
+            })
+            .join('')}
+        </form>
+      `;
+    },
+
+    renderBulkPage(context) {
+      const module = AppStore.getModule();
+      const items = (context.records || [])
+        .map((record) => {
+          const label =
+            record.title || record.name || record.id || `Row ${record.rowNumber}`;
+          return `<li>${label}</li>`;
+        })
+        .join('');
+
+      return `
+        <div class="card">
+          <h2>Bulk Actions</h2>
+          <p class="record-count">${context.selectionCount} ${module.label} selected</p>
+          <ul class="selection-list">${items}</ul>
+          <div class="action-group">
+            <button type="button" class="action-button" disabled>Change Status</button>
+            <button type="button" class="action-button" disabled>Add Tag</button>
+            <button type="button" class="action-button" disabled>Assign Collection</button>
+            <button type="button" class="action-button" disabled>Delete</button>
+            <button type="button" class="action-button" disabled>Duplicate</button>
+          </div>
+          <p class="status">Bulk actions coming soon.</p>
+        </div>
+      `;
+    },
+
+    renderUtilityPage(utilityId) {
+      const labels = {
+        search: 'Search',
+        filters: 'Filters',
+        import: 'Import',
+        export: 'Export'
+      };
+
+      return `
+        <div class="card card--message">
+          <h2>${labels[utilityId] || 'Utility'}</h2>
+          <p>This utility page is coming soon.</p>
+        </div>
+      `;
+    },
+
+    getFormData(fields) {
+      const record = {};
+
+      fields.forEach((field) => {
+        const element = document.getElementById(`field-${field.key}`);
+
+        if (!element) {
+          return;
+        }
+
+        record[field.key] =
+          field.type === 'number' ? getNumericValue(`field-${field.key}`) : element.value.trim();
+      });
+
+      return record;
+    },
+
+    validateForm(fields, record) {
+      const missing = fields
+        .filter((field) => field.required && !String(record[field.key] || '').trim())
+        .map((field) => field.label);
+
+      if (missing.length) {
+        return `Required: ${missing.join(', ')}`;
+      }
+
+      return '';
+    }
+  };
+</script>

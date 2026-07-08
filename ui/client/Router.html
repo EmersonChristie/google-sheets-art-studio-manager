@@ -1,0 +1,253 @@
+<script>
+  const PAGE_TITLES = {
+    dashboard: 'Dashboard',
+    add: 'Add',
+    edit: 'Details',
+    'edit-empty': 'Edit',
+    bulk: 'Bulk Actions',
+    'bulk-empty': 'Bulk Actions',
+    search: 'Search',
+    filters: 'Filters',
+    import: 'Import',
+    export: 'Export',
+    setup: 'Setup Wizard',
+    unsupported: 'Unsupported Sheet'
+  };
+
+  const Router = {
+    init() {
+      this.bindChrome_();
+      this.render();
+    },
+
+    bindChrome_() {
+      document.getElementById('back-button').addEventListener('click', () => {
+        this.goToDashboard();
+      });
+
+      document.getElementById('refresh-button').addEventListener('click', () => {
+        Actions.refreshContext();
+      });
+
+      document.getElementById('cancel-button').addEventListener('click', () => {
+        if (AppStore.page === 'edit') {
+          Actions.refreshContext();
+          return;
+        }
+
+        this.goToDashboard();
+      });
+
+      document.getElementById('save-button').addEventListener('click', () => {
+        Actions.saveCurrentForm();
+      });
+    },
+
+    render() {
+      this.renderHeader_();
+      this.renderContent_();
+      this.renderFooter_();
+    },
+
+    renderHeader_() {
+      const module = AppStore.getModule();
+      const page = AppStore.page;
+      const showBack = !['dashboard', 'setup', 'unsupported'].includes(page);
+      const showRefresh =
+        AppStore.isSetupComplete() &&
+        module &&
+        !AppStore.bootstrap.isSettingsModule;
+
+      document.getElementById('back-button').hidden = !showBack;
+      document.getElementById('refresh-button').hidden = !showRefresh;
+      document.getElementById('module-eyebrow').textContent = module
+        ? module.label
+        : AppStore.bootstrap.activeSheetName;
+      document.getElementById('page-title').textContent = this.getPageTitle_();
+    },
+
+    getPageTitle_() {
+      const module = AppStore.getModule();
+      const page = AppStore.page;
+
+      if (page === 'add' && module) {
+        return module.actions.add;
+      }
+
+      if (page === 'edit' && AppStore.editRecord) {
+        return (
+          AppStore.editRecord.title ||
+          AppStore.editRecord.name ||
+          AppStore.editRecord.id ||
+          module.actions.edit
+        );
+      }
+
+      if ((page === 'bulk' || page === 'bulk-empty') && module) {
+        return module.actions.bulk;
+      }
+
+      if (module && page === 'dashboard') {
+        return module.label;
+      }
+
+      return PAGE_TITLES[page] || 'Dashboard';
+    },
+
+    renderContent_() {
+      const root = document.getElementById('content-root');
+      const setupView = document.getElementById('setup-view');
+      const page = AppStore.page;
+
+      setupView.hidden = page !== 'setup';
+      root.innerHTML = '';
+
+      if (page === 'setup') {
+        loadSetup();
+        return;
+      }
+
+      if (page === 'unsupported') {
+        root.innerHTML = Forms.renderUnsupported_();
+        return;
+      }
+
+      if (page === 'dashboard') {
+        Forms.renderDashboard(root);
+
+        root.querySelector('[data-page="setup"]')?.addEventListener('click', () => {
+          this.openPage('setup');
+        });
+
+        return;
+      }
+
+      if (page === 'add') {
+        root.innerHTML = Forms.renderForm(AppStore.bootstrap.formFields, {});
+        return;
+      }
+
+      if (page === 'edit') {
+        root.innerHTML = Forms.renderForm(
+          AppStore.bootstrap.formFields,
+          AppStore.editRecord || {}
+        );
+        this.bindEditTracking_();
+        return;
+      }
+
+      if (page === 'edit-empty') {
+        root.innerHTML = Forms.renderMessagePage(
+          'No Selection',
+          AppStore.editRecord?.message ||
+            'Mark one row in the Select column, then refresh.'
+        );
+        root.querySelector('[data-page="dashboard"]')?.addEventListener('click', () => {
+          this.goToDashboard();
+        });
+        return;
+      }
+
+      if (page === 'bulk') {
+        root.innerHTML = Forms.renderBulkPage(
+          AppStore.bulkContext || { records: [], selectionCount: 0 }
+        );
+        return;
+      }
+
+      if (page === 'bulk-empty') {
+        root.innerHTML = Forms.renderMessagePage(
+          'No Selection',
+          AppStore.bulkContext?.message ||
+            'Mark two or more rows in the Select column, then refresh.'
+        );
+        root.querySelector('[data-page="dashboard"]')?.addEventListener('click', () => {
+          this.goToDashboard();
+        });
+        return;
+      }
+
+      if (['search', 'filters', 'import', 'export'].includes(page)) {
+        root.innerHTML = Forms.renderUtilityPage(page);
+      }
+    },
+
+    bindEditTracking_() {
+      const saveButton = document.getElementById('save-button');
+      const fields = AppStore.bootstrap.formFields;
+
+      saveButton.hidden = true;
+
+      FormTracking.bind(fields, (isDirty) => {
+        saveButton.hidden = !isDirty;
+      });
+    },
+
+    renderFooter_() {
+      const footer = document.getElementById('shell-footer');
+      const saveButton = document.getElementById('save-button');
+      const page = AppStore.page;
+
+      if (page === 'add') {
+        footer.hidden = false;
+        saveButton.hidden = false;
+        return;
+      }
+
+      if (page === 'edit') {
+        footer.hidden = false;
+        saveButton.hidden = true;
+        return;
+      }
+
+      footer.hidden = true;
+    },
+
+    openPage(page) {
+      if (page === 'dashboard') {
+        this.goToDashboard();
+        return;
+      }
+
+      if (page === 'setup') {
+        AppStore.goToPage('setup');
+        this.render();
+        return;
+      }
+
+      if (page === 'edit') {
+        Actions.openEditFromDashboard();
+        return;
+      }
+
+      if (page === 'bulk') {
+        Actions.openBulkFromDashboard();
+        return;
+      }
+
+      AppStore.manualDashboard = false;
+      AppStore.goToPage(page);
+      AppStore.formMode = page === 'add' ? 'add' : AppStore.formMode;
+      this.render();
+    },
+
+    goToDashboard() {
+      AppStore.goToDashboard();
+      this.render();
+    },
+
+    refreshAfterSetup() {
+      google.script.run
+        .withSuccessHandler((bootstrap) => {
+          AppStore.setBootstrap(bootstrap);
+          this.render();
+          Toast.show('Setup saved.', 'success');
+        })
+        .withFailureHandler((error) => {
+          setStatus('setupStatus', error.message);
+          Toast.show(error.message, 'error');
+        })
+        .getSidebarBootstrap();
+    }
+  };
+</script>

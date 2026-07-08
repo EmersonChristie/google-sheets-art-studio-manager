@@ -1,0 +1,73 @@
+<script>
+  const SelectionPoller = {
+    intervalMs: 2000,
+    timerId: null,
+    isPolling: false,
+
+    start() {
+      if (this.timerId) {
+        return;
+      }
+
+      this.timerId = window.setInterval(() => {
+        this.poll_();
+      }, this.intervalMs);
+
+      window.addEventListener('focus', this.handleFocus_);
+    },
+
+    handleFocus_() {
+      SelectionPoller.poll_();
+    },
+
+    poll_() {
+      if (!AppStore.isSetupComplete() || this.isPolling) {
+        return;
+      }
+
+      this.isPolling = true;
+
+      google.script.run
+        .withSuccessHandler((payload) => {
+          this.isPolling = false;
+          this.applyPollUpdate_(payload);
+        })
+        .withFailureHandler(() => {
+          this.isPolling = false;
+        })
+        .watchSidebarContext();
+    },
+
+    applyPollUpdate_(payload) {
+      const module = AppStore.getModule();
+      const moduleChanged =
+        payload.moduleId !== (module && module.id) ||
+        payload.activeSheetName !== AppStore.bootstrap.activeSheetName;
+
+      if (moduleChanged) {
+        Actions.refreshContext();
+        return;
+      }
+
+      if (payload.selectionSignature === AppStore.lastSelectionSignature) {
+        return;
+      }
+
+      if (AppStore.shouldBlockPollNavigation_()) {
+        if (AppStore.page === 'edit' && FormTracking.isDirty()) {
+          Toast.show('Selection changed. Save or cancel before switching.', 'error');
+        }
+
+        AppStore.lastSelectionSignature = payload.selectionSignature;
+        return;
+      }
+
+      AppStore.lastSelectionSignature = payload.selectionSignature;
+      AppStore.pinToDashboard = false;
+      AppStore.bootstrap.recordCount = payload.recordCount;
+      AppStore.page = payload.page;
+      AppStore.applySelection_(payload.selection);
+      Router.render();
+    }
+  };
+</script>
