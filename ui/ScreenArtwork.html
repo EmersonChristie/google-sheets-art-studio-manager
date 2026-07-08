@@ -1,0 +1,46 @@
+<div class="card">
+  <h2>Add Artwork</h2>
+  <p>Add a new artwork record to the Artwork tab.</p>
+
+  <div class="field">
+    <label for="title">Title</label>
+    <input id="title" placeholder="Ocean Light">
+  </div>
+
+  <div class="field">
+    <label for="medium">Medium</label>
+    <input id="medium" placeholder="Oil on canvas">
+  </div>
+
+  <div class="field">
+    <label for="dimensions">Dimensions</label>
+    <input id="dimensions" placeholder="48 x 60 in">
+  </div>
+
+  <div class="field">
+    <label for="price">Price</label>
+    <input id="price" placeholder="$8,500">
+  </div>
+
+  <div class="field">
+    <label for="status">Status</label>
+    <select id="status">
+      <option>Available</option>
+      <option>Sold</option>
+      <option>Hidden</option>
+    </select>
+  </div>
+
+  <div class="field">
+    <label for="description">Description</label>
+    <textarea id="description" placeholder="Brief artwork description..."></textarea>
+  </div>
+
+  <div class="field">
+    <label for="imageUrl">Image URL</label>
+    <input id="imageUrl" placeholder="https://res.cloudinary.com/...">
+  </div>
+
+  <button class="button-primary" onclick="saveArtwork()">Save Artwork</button>
+  <div id="artworkStatus" class="status"></div>
+</div>

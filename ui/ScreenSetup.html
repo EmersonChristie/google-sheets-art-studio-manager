@@ -1,0 +1,32 @@
+<div class="card">
+  <h2>Setup Wizard</h2>
+  <p>Connect this sheet to the artist website, image hosting, and publish workflow.</p>
+
+  <div class="field">
+    <label for="artistName">Artist / Studio Name</label>
+    <input id="artistName" placeholder="Pfeiffer-Christie Contemporary">
+  </div>
+
+  <div class="field">
+    <label for="websiteUrl">Website URL</label>
+    <input id="websiteUrl" placeholder="https://example.com">
+  </div>
+
+  <div class="field">
+    <label for="cloudinaryCloudName">Cloudinary Cloud Name</label>
+    <input id="cloudinaryCloudName" placeholder="your-cloud-name">
+  </div>
+
+  <div class="field">
+    <label for="cloudinaryUploadPreset">Cloudinary Upload Preset</label>
+    <input id="cloudinaryUploadPreset" placeholder="artist_uploads">
+  </div>
+
+  <div class="field">
+    <label for="deployHookUrl">Deploy Hook URL</label>
+    <input id="deployHookUrl" placeholder="https://api.netlify.com/build_hooks/...">
+  </div>
+
+  <button class="button-primary" onclick="saveSetup()">Save Setup</button>
+  <div id="setupStatus" class="status"></div>
+</div>
