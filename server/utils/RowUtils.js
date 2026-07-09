@@ -1,7 +1,12 @@
 const RECORD_HEADER_FIELDS = {
   artworks: {
     ID: 'id',
+    'Main Image URL': 'mainImage',
     'Main Image': 'mainImage',
+    'Secondary Image URLs': 'secondaryImages',
+    'Secondary Images': 'secondaryImages',
+    'Drive Folder URL': 'driveFolderUrl',
+    'Drive Folder ID': 'driveFolderId',
     Title: 'title',
     Year: 'year',
     Medium: 'medium',
@@ -12,7 +17,6 @@ const RECORD_HEADER_FIELDS = {
     Price: 'price',
     Description: 'description',
     Notes: 'notes',
-    'Secondary Images': 'secondaryImages',
     Select: 'select'
   },
   contacts: {

@@ -1,5 +1,12 @@
 <script>
   const Forms = {
+    getArtworkAddDefaults() {
+      return {
+        title: 'Untitled',
+        year: String(new Date().getFullYear())
+      };
+    },
+
     renderDashboard(root) {
       const module = AppStore.getModule();
 
@@ -85,14 +92,24 @@
 
     renderForm(fields, record) {
       const values = record || {};
+      const formFields = Array.isArray(fields) ? fields : [];
 
       return `
         <form id="record-form" class="record-form">
-          ${fields
+          ${formFields
             .map((field) => {
               const fieldId = `field-${field.key}`;
-              const value = values[field.key] ?? '';
+              let rawValue = values[field.key];
+              let value = rawValue === undefined || rawValue === null ? '' : rawValue;
               const required = field.required ? 'required' : '';
+
+              if (field.key === 'secondaryImages' && typeof value === 'string' && value.indexOf('[') === 0) {
+                try {
+                  value = JSON.stringify(JSON.parse(value), null, 2);
+                } catch (error) {
+                  // Keep original value when JSON parsing fails.
+                }
+              }
 
               if (field.type === 'textarea') {
                 return `
@@ -139,6 +156,79 @@
             .join('')}
         </form>
       `;
+    },
+
+    renderArtworkAddForm(fields, defaultStorageMode) {
+      const baseForm = this.renderForm(fields, this.getArtworkAddDefaults());
+      const storageMode = defaultStorageMode || 'default-folder';
+      const imageSection = `
+        <div class="field field--file">
+          <label for="artwork-main-image">Main Image</label>
+          <input
+            id="artwork-main-image"
+            type="file"
+            accept="image/jpeg,image/png,image/gif,image/webp"
+          >
+        </div>
+
+        <div class="field field--file">
+          <label for="artwork-secondary-images">Secondary Images</label>
+          <input
+            id="artwork-secondary-images"
+            type="file"
+            accept="image/jpeg,image/png,image/gif,image/webp"
+            multiple
+          >
+          <p class="field-hint">Optional. Additional images are numbered 2, 3, and so on.</p>
+        </div>
+
+        <div class="field field--radios">
+          <p class="section-label">Image Storage</p>
+          <label class="radio-option">
+            <input
+              type="radio"
+              name="imageStorageMode"
+              value="default-folder"
+              ${storageMode === 'default-folder' ? 'checked' : ''}
+            >
+            Artwork folder
+          </label>
+          <label class="radio-option">
+            <input
+              type="radio"
+              name="imageStorageMode"
+              value="artwork-subfolder"
+              ${storageMode === 'artwork-subfolder' ? 'checked' : ''}
+            >
+            Individual artwork subfolder
+          </label>
+        </div>
+      `;
+
+      return baseForm.replace('</form>', imageSection + '</form>');
+    },
+
+    bindArtworkFormBehaviors_() {
+      const widthInput = document.getElementById('field-width');
+      const heightInput = document.getElementById('field-height');
+      const dimensionsInput = document.getElementById('field-dimensions');
+
+      if (!widthInput || !heightInput || !dimensionsInput) {
+        return;
+      }
+
+      const syncDimensions = () => {
+        const width = widthInput.value.trim();
+        const height = heightInput.value.trim();
+
+        if (width && height) {
+          dimensionsInput.value = height + ' x ' + width;
+        }
+      };
+
+      widthInput.addEventListener('input', syncDimensions);
+      heightInput.addEventListener('input', syncDimensions);
+      syncDimensions();
     },
 
     renderBulkPage(context) {

@@ -1,10 +1,3 @@
-const ARTWORK_STATUS_OPTIONS = [
-  'Available',
-  'Sold',
-  'On Hold',
-  'On Consignment'
-];
-
 /**
  * @param {string} moduleId
  * @returns {GoogleAppsScript.Spreadsheet.Sheet}
@@ -227,14 +220,15 @@ function normalizeArtworkStatus_(status) {
  */
 function generateRecordId_(moduleId, sheet) {
   const prefixes = {
-    artworks: 'ART',
+    artworks: 'AW',
     contacts: 'CON',
     collections: 'COL'
   };
   const prefix = prefixes[moduleId] || 'REC';
   const nextId = Math.max(sheet.getLastRow(), 1);
+  const padLength = moduleId === 'artworks' ? 4 : 3;
 
-  return `${prefix}-${String(nextId).padStart(3, '0')}`;
+  return prefix + '-' + String(nextId).padStart(padLength, '0');
 }
 
 function triggerDeployHook_() {

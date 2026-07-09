@@ -87,6 +87,10 @@
       }
 
       if (AppStore.formMode === 'edit' && AppStore.selectedRow) {
+        const editFields =
+          AppStore.bootstrap.editFormFields || AppStore.bootstrap.formFields;
+        const editRecord = Forms.getFormData(editFields);
+
         this.setLoading_(true);
 
         google.script.run
@@ -99,8 +103,13 @@
             this.setLoading_(false);
             Toast.show(error.message, 'error');
           })
-          .updateModuleRecord(module.id, AppStore.selectedRow, record);
+          .updateModuleRecord(module.id, AppStore.selectedRow, editRecord);
 
+        return;
+      }
+
+      if (module.id === 'artworks') {
+        this.saveArtworkWithImages_(record);
         return;
       }
 
@@ -117,6 +126,36 @@
           Toast.show(error.message, 'error');
         })
         .saveModuleRecord(module.id, record);
+    },
+
+    saveArtworkWithImages_(record) {
+      const self = this;
+
+      this.setLoading_(true);
+
+      ImageUpload.collectArtworkImages()
+        .then((images) => {
+          const payload = Object.assign({}, record, {
+            storageMode: ImageUpload.getSelectedStorageMode(),
+            images: images
+          });
+
+          google.script.run
+            .withSuccessHandler((response) => {
+              self.setLoading_(false);
+              Toast.show(response.message, 'success');
+              self.refreshContextAndDashboard_();
+            })
+            .withFailureHandler((error) => {
+              self.setLoading_(false);
+              Toast.show(error.message, 'error');
+            })
+            .saveArtworkRecord(payload);
+        })
+        .catch((error) => {
+          self.setLoading_(false);
+          Toast.show(error.message, 'error');
+        });
     },
 
     refreshAfterEditSave_() {
@@ -150,6 +189,15 @@
     google.script.run
       .withSuccessHandler((settings) => {
         SETUP_FIELDS.forEach((field) => setValue(field, settings[field]));
+
+        const mode = settings.imageStorageMode || 'default-folder';
+        const radio = document.querySelector(
+          'input[name="setupImageStorageMode"][value="' + mode + '"]'
+        );
+
+        if (radio) {
+          radio.checked = true;
+        }
       })
       .withFailureHandler((error) => setStatus('setupStatus', error.message))
       .getSetup();
@@ -162,6 +210,9 @@
       acc[field] = getValue(field);
       return acc;
     }, {});
+
+    const selectedMode = document.querySelector('input[name="setupImageStorageMode"]:checked');
+    settings.imageStorageMode = selectedMode ? selectedMode.value : 'default-folder';
 
     google.script.run
       .withSuccessHandler((response) => {

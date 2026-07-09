@@ -254,6 +254,41 @@
     resize: vertical;
   }
 
+  input[type='file'] {
+    height: auto;
+    padding: 10px;
+    font-size: 14px;
+  }
+
+  .field-hint {
+    margin: var(--space-2) 0 0;
+    font-size: 12px;
+    color: var(--color-muted);
+  }
+
+  .field--radios .section-label {
+    margin-bottom: var(--space-3);
+  }
+
+  .radio-option {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-bottom: var(--space-2);
+    font-size: 14px;
+    font-weight: 400;
+    letter-spacing: normal;
+    text-transform: none;
+    color: var(--color-text);
+    cursor: pointer;
+  }
+
+  .radio-option input[type='radio'] {
+    width: auto;
+    height: auto;
+    margin: 0;
+  }
+
   select {
     appearance: none;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%23888888' d='M1.41 0L6 4.58 10.59 0 12 1.41l-6 6-6-6z'/%3E%3C/svg%3E");

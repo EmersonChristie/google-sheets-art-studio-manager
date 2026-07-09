@@ -5,8 +5,11 @@ const SETUP_KEYS = [
   'websiteUrl',
   'cloudinaryCloudName',
   'cloudinaryUploadPreset',
-  'deployHookUrl'
+  'deployHookUrl',
+  'imageStorageMode'
 ];
+
+const DEFAULT_IMAGE_STORAGE_MODE = 'default-folder';
 
 /**
  * @returns {boolean}
@@ -21,22 +24,34 @@ function isOrganizationConfigured() {
 
 function getSetup() {
   const props = PropertiesService.getDocumentProperties();
-
-  return SETUP_KEYS.reduce((settings, key) => {
-    settings[key] = props.getProperty(key) || '';
-    return settings;
+  const settings = SETUP_KEYS.reduce((acc, key) => {
+    acc[key] = props.getProperty(key) || '';
+    return acc;
   }, {});
+
+  if (!settings.imageStorageMode) {
+    settings.imageStorageMode = DEFAULT_IMAGE_STORAGE_MODE;
+  }
+
+  return settings;
 }
 
 function saveSetup(settings) {
   const props = PropertiesService.getDocumentProperties();
+  const normalized = Object.assign({}, settings);
+
+  if (!normalized.imageStorageMode) {
+    normalized.imageStorageMode = DEFAULT_IMAGE_STORAGE_MODE;
+  }
 
   SETUP_KEYS.forEach((key) => {
-    props.setProperty(key, String(settings[key] || '').trim());
+    props.setProperty(key, String(normalized[key] || '').trim());
   });
 
   if (isOrganizationConfigured()) {
-    ensureWorkspaceSheets();
+    provisionWorkspaceOnSetup_();
+    syncSetupToSettingsSheet_(normalized);
+    getOrCreateArtworkFolder();
   }
 
   return { message: 'Setup saved.' };

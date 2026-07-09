@@ -12,7 +12,7 @@ function showSidebar_() {
 
   const bootstrap = getSidebarBootstrap_();
   const template = HtmlService.createTemplateFromFile('ui/Sidebar');
-  template.bootstrapJson = JSON.stringify(bootstrap);
+  template.bootstrapJson = sanitizeJsonForHtml_(bootstrap);
 
   const html = template.evaluate().setTitle(getAppConfig().name);
   SpreadsheetApp.getUi().showSidebar(html);
@@ -92,6 +92,8 @@ function getSidebarBootstrap_() {
     module: module,
     recordCount: getModuleRecordCount(module.id),
     formFields: getFormFieldsForModule(module.id),
+    editFormFields: getFormFieldsForModule(module.id, 'edit'),
+    imageStorageMode: getSetup().imageStorageMode || 'default-folder',
     utilityLabels: getUtilityLabels_(module),
     isSettingsModule: false,
     selection: selection

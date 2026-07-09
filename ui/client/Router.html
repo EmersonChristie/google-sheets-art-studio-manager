@@ -115,36 +115,57 @@
       if (page === 'dashboard') {
         Forms.renderDashboard(root);
 
-        root.querySelector('[data-page="setup"]')?.addEventListener('click', () => {
-          this.openPage('setup');
-        });
+        const setupButton = root.querySelector('[data-page="setup"]');
+
+        if (setupButton) {
+          setupButton.addEventListener('click', () => {
+            this.openPage('setup');
+          });
+        }
 
         return;
       }
 
       if (page === 'add') {
-        root.innerHTML = Forms.renderForm(AppStore.bootstrap.formFields, {});
+        const module = AppStore.getModule();
+
+        if (module && module.id === 'artworks') {
+          root.innerHTML = Forms.renderArtworkAddForm(
+            AppStore.bootstrap.formFields,
+            AppStore.bootstrap.imageStorageMode
+          );
+          Forms.bindArtworkFormBehaviors_();
+        } else {
+          root.innerHTML = Forms.renderForm(AppStore.bootstrap.formFields, {});
+        }
+
         return;
       }
 
       if (page === 'edit') {
-        root.innerHTML = Forms.renderForm(
-          AppStore.bootstrap.formFields,
-          AppStore.editRecord || {}
-        );
-        this.bindEditTracking_();
+        const editFields =
+          AppStore.bootstrap.editFormFields || AppStore.bootstrap.formFields;
+
+        root.innerHTML = Forms.renderForm(editFields, AppStore.editRecord || {});
+        this.bindEditTracking_(editFields);
         return;
       }
 
       if (page === 'edit-empty') {
         root.innerHTML = Forms.renderMessagePage(
           'No Selection',
-          AppStore.editRecord?.message ||
-            'Mark one row in the Select column, then refresh.'
+          AppStore.editRecord && AppStore.editRecord.message
+            ? AppStore.editRecord.message
+            : 'Mark one row in the Select column, then refresh.'
         );
-        root.querySelector('[data-page="dashboard"]')?.addEventListener('click', () => {
-          this.goToDashboard();
-        });
+        const dashboardButton = root.querySelector('[data-page="dashboard"]');
+
+        if (dashboardButton) {
+          dashboardButton.addEventListener('click', () => {
+            this.goToDashboard();
+          });
+        }
+
         return;
       }
 
@@ -158,12 +179,18 @@
       if (page === 'bulk-empty') {
         root.innerHTML = Forms.renderMessagePage(
           'No Selection',
-          AppStore.bulkContext?.message ||
-            'Mark two or more rows in the Select column, then refresh.'
+          AppStore.bulkContext && AppStore.bulkContext.message
+            ? AppStore.bulkContext.message
+            : 'Mark two or more rows in the Select column, then refresh.'
         );
-        root.querySelector('[data-page="dashboard"]')?.addEventListener('click', () => {
-          this.goToDashboard();
-        });
+        const dashboardButton = root.querySelector('[data-page="dashboard"]');
+
+        if (dashboardButton) {
+          dashboardButton.addEventListener('click', () => {
+            this.goToDashboard();
+          });
+        }
+
         return;
       }
 
@@ -172,13 +199,13 @@
       }
     },
 
-    bindEditTracking_() {
+    bindEditTracking_(fields) {
       const saveButton = document.getElementById('save-button');
-      const fields = AppStore.bootstrap.formFields;
+      const formFields = fields || AppStore.bootstrap.editFormFields || AppStore.bootstrap.formFields;
 
       saveButton.hidden = true;
 
-      FormTracking.bind(fields, (isDirty) => {
+      FormTracking.bind(formFields, (isDirty) => {
         saveButton.hidden = !isDirty;
       });
     },

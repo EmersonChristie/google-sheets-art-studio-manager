@@ -1,7 +1,13 @@
 <script>
-  document.addEventListener('DOMContentLoaded', () => {
+  function bootApp() {
     AppStore.init(window.APP_BOOTSTRAP);
     Router.init();
     SelectionPoller.start();
-  });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bootApp);
+  } else {
+    bootApp();
+  }
 </script>

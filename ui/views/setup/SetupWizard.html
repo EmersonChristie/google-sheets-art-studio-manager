@@ -28,6 +28,19 @@
       <input id="deployHookUrl" placeholder="https://api.netlify.com/build_hooks/...">
     </div>
 
+    <div class="field field--radios">
+      <p class="section-label">Default Image Storage</p>
+      <label class="radio-option">
+        <input type="radio" name="setupImageStorageMode" value="default-folder" checked>
+        Artwork folder
+      </label>
+      <label class="radio-option">
+        <input type="radio" name="setupImageStorageMode" value="artwork-subfolder">
+        Individual artwork subfolder
+      </label>
+      <p class="field-hint">Used as the default when adding new artworks.</p>
+    </div>
+
     <button class="button-primary" type="button" onclick="saveSetup()">Save Setup</button>
     <div id="setupStatus" class="status"></div>
   </div>

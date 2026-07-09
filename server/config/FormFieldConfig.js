@@ -3,11 +3,29 @@ const FORM_FIELD_CONFIG = {
     { key: 'title', label: 'Title', type: 'text', required: true },
     { key: 'year', label: 'Year', type: 'number' },
     { key: 'medium', label: 'Medium', type: 'text' },
-    { key: 'width', label: 'Width', type: 'number' },
-    { key: 'height', label: 'Height', type: 'number' },
+    { key: 'width', label: 'Width (in)', type: 'number' },
+    { key: 'height', label: 'Height (in)', type: 'number' },
     { key: 'dimensions', label: 'Dimensions', type: 'text' },
-    { key: 'mainImage', label: 'Main Image', type: 'text' },
-    { key: 'secondaryImages', label: 'Secondary Images', type: 'text' },
+    {
+      key: 'status',
+      label: 'Status',
+      type: 'select',
+      options: ['Available', 'Sold', 'On Hold', 'On Consignment']
+    },
+    { key: 'price', label: 'Price', type: 'number' },
+    { key: 'description', label: 'Description', type: 'textarea' },
+    { key: 'notes', label: 'Notes', type: 'textarea' }
+  ],
+  artworksEdit: [
+    { key: 'title', label: 'Title', type: 'text', required: true },
+    { key: 'year', label: 'Year', type: 'number' },
+    { key: 'medium', label: 'Medium', type: 'text' },
+    { key: 'width', label: 'Width (in)', type: 'number' },
+    { key: 'height', label: 'Height (in)', type: 'number' },
+    { key: 'dimensions', label: 'Dimensions', type: 'text' },
+    { key: 'mainImage', label: 'Main Image URL', type: 'text' },
+    { key: 'secondaryImages', label: 'Secondary Image URLs', type: 'textarea' },
+    { key: 'driveFolderUrl', label: 'Drive Folder URL', type: 'text' },
     {
       key: 'status',
       label: 'Status',
@@ -45,11 +63,14 @@ const FORM_FIELD_CONFIG = {
 
 /**
  * @param {string} moduleId
+ * @param {string=} mode
  * @returns {Array<object>}
  */
-function getFormFieldsForModule(moduleId) {
-  return FORM_FIELD_CONFIG[moduleId]
-    ? FORM_FIELD_CONFIG[moduleId].map((field) => Object.assign({}, field))
+function getFormFieldsForModule(moduleId, mode) {
+  const key = mode === 'edit' && moduleId === 'artworks' ? 'artworksEdit' : moduleId;
+
+  return FORM_FIELD_CONFIG[key]
+    ? FORM_FIELD_CONFIG[key].map((field) => Object.assign({}, field))
     : [];
 }
 

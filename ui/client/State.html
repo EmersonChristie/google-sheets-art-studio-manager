@@ -69,7 +69,7 @@
     },
 
     isSetupComplete() {
-      return Boolean(this.bootstrap?.isSetupComplete);
+      return Boolean(this.bootstrap && this.bootstrap.isSetupComplete);
     },
 
     getModule() {

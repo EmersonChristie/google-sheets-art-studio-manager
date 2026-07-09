@@ -1,0 +1,63 @@
+<script>
+  const ImageUpload = {
+    readFileAsPayload(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+
+        reader.onload = () => {
+          const result = String(reader.result || '');
+          const base64 = result.split(',')[1] || '';
+
+          if (!base64) {
+            reject(new Error('Could not read ' + file.name + '.'));
+            return;
+          }
+
+          resolve({
+            fileName: file.name,
+            mimeType: file.type,
+            data: base64
+          });
+        };
+
+        reader.onerror = () => {
+          reject(new Error('Failed to read ' + file.name + '.'));
+        };
+
+        reader.readAsDataURL(file);
+      });
+    },
+
+    collectArtworkImages() {
+      const mainInput = document.getElementById('artwork-main-image');
+      const secondaryInput = document.getElementById('artwork-secondary-images');
+      const images = [];
+
+      return Promise.resolve().then(() => {
+        if (mainInput && mainInput.files && mainInput.files[0]) {
+          return this.readFileAsPayload(mainInput.files[0]).then((payload) => {
+            images.push(payload);
+          });
+        }
+      }).then(() => {
+        if (!secondaryInput || !secondaryInput.files || !secondaryInput.files.length) {
+          return;
+        }
+
+        const uploads = Array.from(secondaryInput.files).map((file) => {
+          return this.readFileAsPayload(file).then((payload) => {
+            images.push(payload);
+          });
+        });
+
+        return Promise.all(uploads);
+      }).then(() => images);
+    },
+
+    getSelectedStorageMode() {
+      const selected = document.querySelector('input[name="imageStorageMode"]:checked');
+
+      return selected ? selected.value : 'default-folder';
+    }
+  };
+</script>

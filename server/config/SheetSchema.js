@@ -7,12 +7,19 @@ const SHEET_HEADERS = {
     'Website URL',
     'Cloudinary Cloud Name',
     'Cloudinary Upload Preset',
-    'Deploy Hook URL'
+    'Deploy Hook URL',
+    'Artwork Folder ID',
+    'Artwork Folder Name',
+    'Artwork Folder URL',
+    'Default Image Storage'
   ],
   Artworks: [
     'Select',
     'ID',
-    'Main Image',
+    'Main Image URL',
+    'Secondary Image URLs',
+    'Drive Folder URL',
+    'Drive Folder ID',
     'Title',
     'Year',
     'Medium',
@@ -22,10 +29,7 @@ const SHEET_HEADERS = {
     'Status',
     'Price',
     'Description',
-    'Notes',
-    'Secondary Images',
-    '',
-    ''
+    'Notes'
   ],
   Collections: ['Select', 'ID', 'Name', 'Slug', 'Description', 'Visibility'],
   Contacts: ['Select', 'ID', 'Name', 'Email', 'Phone', 'Contact Type', 'Notes']
