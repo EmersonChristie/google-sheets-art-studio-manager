@@ -87,6 +87,7 @@ function getImportSchemaForModule(moduleId) {
         fieldKey: fieldKey,
         required: requiredKeys.indexOf(fieldKey) !== -1,
         type: columnType.type,
+        dataType: getCrmDataType_(fieldKey, columnType.type, formField),
         options: columnType.options || [],
         label: formField ? formField.label : header
       };

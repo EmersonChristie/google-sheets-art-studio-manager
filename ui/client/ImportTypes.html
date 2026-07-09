@@ -1,0 +1,287 @@
+<script>
+  const ImportTypes = {
+    DATA_TYPES: {
+      TEXT: 'text',
+      NUMBER: 'number',
+      CURRENCY: 'currency',
+      DATE: 'date',
+      BOOLEAN: 'boolean',
+      URL: 'url',
+      EMAIL: 'email',
+      IMAGE_URL: 'image-url',
+      MULTI_VALUE: 'multi-value',
+      UNKNOWN: 'unknown'
+    },
+
+    BOOLEAN_TRUE: ['true', 'yes', 'y', '1'],
+    BOOLEAN_FALSE: ['false', 'no', 'n', '0'],
+
+    getLabel(dataType) {
+      const labels = {
+        text: 'Text',
+        number: 'Number',
+        currency: 'Currency',
+        date: 'Date',
+        boolean: 'Boolean',
+        url: 'URL',
+        email: 'Email',
+        'image-url': 'Image URL',
+        'multi-value': 'Multi-value list',
+        unknown: 'Unknown'
+      };
+
+      return labels[dataType] || 'Unknown';
+    },
+
+    analyzeColumn(values) {
+      const populated = values
+        .map((value) => String(value === undefined || value === null ? '' : value).trim())
+        .filter(Boolean);
+
+      const detectedType = this.detectColumnType(populated);
+
+      return {
+        sample: populated.length ? populated[0] : '',
+        populatedCount: populated.length,
+        detectedType: detectedType,
+        detectedLabel: this.getLabel(detectedType)
+      };
+    },
+
+    detectColumnType(values) {
+      if (!values.length) {
+        return this.DATA_TYPES.UNKNOWN;
+      }
+
+      const sample = values.slice(0, 25);
+      const scores = {};
+      let total = 0;
+
+      sample.forEach((value) => {
+        const type = this.detectSingleValueType(value);
+        scores[type] = (scores[type] || 0) + 1;
+        total++;
+      });
+
+      const ranked = Object.keys(scores).sort((a, b) => scores[b] - scores[a]);
+      const winner = ranked[0] || this.DATA_TYPES.UNKNOWN;
+      const confidence = total ? scores[winner] / total : 0;
+
+      if (confidence < 0.5) {
+        return this.DATA_TYPES.TEXT;
+      }
+
+      return winner;
+    },
+
+    detectSingleValueType(value) {
+      const trimmed = String(value || '').trim();
+
+      if (!trimmed) {
+        return this.DATA_TYPES.UNKNOWN;
+      }
+
+      const lower = trimmed.toLowerCase();
+
+      if (this.BOOLEAN_TRUE.indexOf(lower) !== -1 || this.BOOLEAN_FALSE.indexOf(lower) !== -1) {
+        return this.DATA_TYPES.BOOLEAN;
+      }
+
+      if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+        return this.DATA_TYPES.EMAIL;
+      }
+
+      if (/^https?:\/\//i.test(trimmed)) {
+        if (/\.(jpg|jpeg|png|gif|webp)(\?|$)/i.test(trimmed) || /drive\.google\.com/i.test(trimmed)) {
+          return this.DATA_TYPES.IMAGE_URL;
+        }
+
+        return this.DATA_TYPES.URL;
+      }
+
+      if (/^[\$€£]\s?[\d,]+(\.\d+)?$/.test(trimmed) || /^[\d,]+(\.\d+)?\s?[\$€£]$/.test(trimmed)) {
+        return this.DATA_TYPES.CURRENCY;
+      }
+
+      if (this.looksLikeDate(trimmed)) {
+        return this.DATA_TYPES.DATE;
+      }
+
+      if (trimmed.indexOf(',') !== -1 && trimmed.split(',').length > 1) {
+        return this.DATA_TYPES.MULTI_VALUE;
+      }
+
+      if (/^-?\d+(\.\d+)?$/.test(trimmed.replace(/,/g, ''))) {
+        return this.DATA_TYPES.NUMBER;
+      }
+
+      return this.DATA_TYPES.TEXT;
+    },
+
+    looksLikeDate(value) {
+      if (/^\d{4}-\d{1,2}-\d{1,2}$/.test(value)) {
+        return true;
+      }
+
+      if (/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(value)) {
+        return true;
+      }
+
+      if (/^\d{1,2}-\d{1,2}-\d{2,4}$/.test(value)) {
+        return true;
+      }
+
+      const parsed = Date.parse(value);
+      return Number.isFinite(parsed) && value.length >= 6;
+    },
+
+    getCrmDataType(column) {
+      if (!column) {
+        return this.DATA_TYPES.TEXT;
+      }
+
+      return column.dataType || this.DATA_TYPES.TEXT;
+    },
+
+    areCompatible(csvType, crmType) {
+      if (!csvType || !crmType || csvType === this.DATA_TYPES.UNKNOWN) {
+        return true;
+      }
+
+      if (csvType === crmType) {
+        return true;
+      }
+
+      const compatible = {
+        currency: ['number', 'currency', 'text'],
+        number: ['number', 'currency', 'text'],
+        text: ['text', 'multi-value', 'url', 'email', 'image-url', 'date', 'boolean', 'unknown'],
+        'multi-value': ['text', 'multi-value'],
+        url: ['url', 'image-url', 'text'],
+        'image-url': ['image-url', 'url', 'text'],
+        email: ['email', 'text'],
+        date: ['date', 'text', 'number'],
+        boolean: ['boolean', 'text'],
+        unknown: ['text', 'number', 'currency', 'date', 'boolean', 'url', 'email', 'image-url', 'multi-value']
+      };
+
+      const allowed = compatible[csvType] || [this.DATA_TYPES.TEXT];
+      return allowed.indexOf(crmType) !== -1;
+    },
+
+    getCompatibilityWarning(csvType, crmType) {
+      if (this.areCompatible(csvType, crmType)) {
+        return '';
+      }
+
+      return this.getLabel(csvType) + ' being mapped to ' + this.getLabel(crmType);
+    },
+
+    normalizeValue(value, csvType, crmType, fieldKey) {
+      if (value === '' || value === null || value === undefined) {
+        return { value: '', normalized: false };
+      }
+
+      let text = String(value).replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+      let normalized = text !== String(value);
+
+      if (
+        crmType === this.DATA_TYPES.NUMBER ||
+        crmType === this.DATA_TYPES.CURRENCY ||
+        csvType === this.DATA_TYPES.CURRENCY ||
+        csvType === this.DATA_TYPES.NUMBER ||
+        fieldKey === 'price' ||
+        fieldKey === 'year' ||
+        fieldKey === 'width' ||
+        fieldKey === 'height'
+      ) {
+        const numeric = this.parseNumber(text);
+
+        if (numeric !== null) {
+          return { value: numeric, normalized: true };
+        }
+      }
+
+      if (crmType === this.DATA_TYPES.BOOLEAN || csvType === this.DATA_TYPES.BOOLEAN) {
+        const boolValue = this.parseBoolean(text);
+
+        if (boolValue !== null) {
+          return { value: boolValue, normalized: true };
+        }
+      }
+
+      if (crmType === this.DATA_TYPES.DATE || csvType === this.DATA_TYPES.DATE) {
+        const dateValue = this.parseDate(text);
+
+        if (dateValue) {
+          return { value: dateValue, normalized: true };
+        }
+      }
+
+      if (csvType === this.DATA_TYPES.MULTI_VALUE && fieldKey === 'secondaryImages') {
+        const urls = text
+          .split(',')
+          .map((part) => part.trim())
+          .filter(Boolean);
+
+        if (urls.length > 1) {
+          return { value: JSON.stringify(urls), normalized: true };
+        }
+      }
+
+      return { value: text, normalized: normalized };
+    },
+
+    parseNumber(value) {
+      const cleaned = String(value || '')
+        .trim()
+        .replace(/[\$€£]/g, '')
+        .replace(/,/g, '')
+        .trim();
+
+      if (!cleaned) {
+        return null;
+      }
+
+      const num = Number(cleaned);
+      return Number.isFinite(num) ? num : null;
+    },
+
+    parseBoolean(value) {
+      const lower = String(value || '').trim().toLowerCase();
+
+      if (this.BOOLEAN_TRUE.indexOf(lower) !== -1) {
+        return true;
+      }
+
+      if (this.BOOLEAN_FALSE.indexOf(lower) !== -1) {
+        return false;
+      }
+
+      return null;
+    },
+
+    parseDate(value) {
+      const trimmed = String(value || '').trim();
+
+      if (!trimmed || !this.looksLikeDate(trimmed)) {
+        return '';
+      }
+
+      const parsed = new Date(trimmed);
+
+      if (!Number.isFinite(parsed.getTime())) {
+        return '';
+      }
+
+      if (/^\d{4}$/.test(trimmed)) {
+        return String(parsed.getFullYear());
+      }
+
+      const year = parsed.getFullYear();
+      const month = String(parsed.getMonth() + 1).padStart(2, '0');
+      const day = String(parsed.getDate()).padStart(2, '0');
+      return year + '-' + month + '-' + day;
+    }
+  };
+</script>

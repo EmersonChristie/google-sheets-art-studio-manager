@@ -7,9 +7,11 @@
       csvHeaders: [],
       csvRows: [],
       crmMappings: [],
+      columnProfiles: {},
       unusedColumnActions: {},
       previewRows: [],
       previewColumns: [],
+      importSummary: null,
       validation: {
         blocking: [],
         warnings: []
@@ -51,9 +53,11 @@
         csvHeaders: [],
         csvRows: [],
         crmMappings: [],
+        columnProfiles: {},
         unusedColumnActions: {},
         previewRows: [],
         previewColumns: [],
+        importSummary: null,
         validation: { blocking: [], warnings: [] },
         importResult: null,
         isLoading: false
@@ -153,7 +157,9 @@
       const csvOptions = availableCsv
         .map((csvHeader) => {
           const selected = mapping.csvHeader === csvHeader ? 'selected' : '';
-          return `<option value="${this.escapeHtml_(csvHeader)}" ${selected}>${this.escapeHtml_(csvHeader)}</option>`;
+          const profile = this.state.columnProfiles[csvHeader];
+          const typeHint = profile ? ' · ' + profile.detectedLabel : '';
+          return `<option value="${this.escapeHtml_(csvHeader)}" ${selected}>${this.escapeHtml_(csvHeader + typeHint)}</option>`;
         })
         .join('');
       const status = this.getCrmMappingStatus_(mapping);
@@ -161,20 +167,30 @@
       const requiredLabel = mapping.required
         ? '<span class="import-field-tag import-field-tag--required">Required</span>'
         : '<span class="import-field-tag">Optional</span>';
+      const crmColumn = this.getSchemaColumn_(mapping.fieldKey);
+      const crmTypeLabel = ImportTypes.getLabel(ImportTypes.getCrmDataType(crmColumn));
+      const selectedProfile = mapping.csvHeader ? this.state.columnProfiles[mapping.csvHeader] : null;
+      const compatWarning = this.getMappingCompatibilityWarning_(mapping);
 
       return `
         <div class="import-dest-row">
           <div class="import-dest-row__field">
             <strong>${this.escapeHtml_(mapping.header)}</strong>
             ${requiredLabel}
+            <span class="import-type-badge import-type-badge--crm">${this.escapeHtml_(crmTypeLabel)}</span>
           </div>
 
           <div class="import-dest-row__select">
             <label class="import-mapping-label" for="crm-map-${this.escapeHtml_(mapping.fieldKey)}">CSV column</label>
-            <select id="crm-map-${this.escapeHtml_(mapping.fieldKey)}" data-crm-map="${this.escapeHtml_(mapping.fieldKey)}">
-              <option value="">Not mapped</option>
-              ${csvOptions}
-            </select>
+            <div class="import-select-group">
+              <select id="crm-map-${this.escapeHtml_(mapping.fieldKey)}" data-crm-map="${this.escapeHtml_(mapping.fieldKey)}">
+                <option value="">Not mapped</option>
+                ${csvOptions}
+              </select>
+              ${mapping.csvHeader ? this.renderColumnInfoTrigger_(mapping.csvHeader) : ''}
+            </div>
+            ${selectedProfile ? `<span class="import-type-badge">${this.escapeHtml_(selectedProfile.detectedLabel)}</span>` : ''}
+            ${compatWarning ? `<p class="import-compat-warning">⚠ ${this.escapeHtml_(compatWarning)}</p>` : ''}
           </div>
 
           <div class="import-dest-row__status">
@@ -218,7 +234,11 @@
         <div class="import-unused-row">
           <div class="import-unused-row__name">
             <span class="import-mapping-label">CSV column</span>
-            <strong>${this.escapeHtml_(csvHeader)}</strong>
+            <div class="import-select-group">
+              <strong>${this.escapeHtml_(csvHeader)}</strong>
+              ${this.renderColumnInfoTrigger_(csvHeader)}
+            </div>
+            ${this.renderTypeBadge_(csvHeader)}
           </div>
 
           <div class="import-unused-row__action">
@@ -305,13 +325,20 @@
         })
         .join('');
 
+      const previewWarnings = issues.warnings
+        .slice(0, 8)
+        .map((warning) => `<li class="import-issue import-issue--warning">${this.escapeHtml_(warning)}</li>`)
+        .join('');
+
       return `
         <div class="import-flow">
           <div class="card">
             <h2>Preview Import</h2>
+            ${this.renderImportSummary_()}
             <p class="import-meta">${this.state.previewRows.length} rows · ${previewColumns.length} columns${customCount ? ' · ' + customCount + ' new custom field(s)' : ''}</p>
 
             ${issues.blocking.length ? `<ul class="import-issue-list">${blocking}</ul>` : '<p class="status">All mapped rows passed validation.</p>'}
+            ${previewWarnings ? `<ul class="import-issue-list import-issue-list--warnings">${previewWarnings}</ul>` : ''}
 
             <div class="import-preview-wrap">
               <table class="import-preview-table">
@@ -390,6 +417,8 @@
           this.handleAction_(button.getAttribute('data-import-action'), root);
         });
       });
+
+      this.bindColumnInfoPopovers_(root);
     },
 
     handleAction_(action, root) {
@@ -447,6 +476,7 @@
           this.state.csvRows = parsed.rows;
           this.state.crmMappings = mapped.crmMappings;
           this.state.unusedColumnActions = mapped.unusedColumnActions;
+          this.buildColumnProfiles_();
           this.state.step = 'mapping';
           this.render(root);
         } catch (error) {
@@ -602,6 +632,8 @@
 
     buildPreview_() {
       this.state.previewColumns = this.getPreviewColumns_();
+      let normalizedCount = 0;
+
       this.state.previewRows = this.state.csvRows.map((row) => {
         const record = { customFields: {} };
 
@@ -610,9 +642,22 @@
             return;
           }
 
-          const value = row[mapping.csvHeader];
-          record[mapping.fieldKey] =
-            value === undefined || value === null ? '' : String(value).trim();
+          const rawValue = row[mapping.csvHeader];
+          const profile = this.state.columnProfiles[mapping.csvHeader] || {};
+          const column = this.getSchemaColumn_(mapping.fieldKey);
+          const crmType = ImportTypes.getCrmDataType(column);
+          const result = ImportTypes.normalizeValue(
+            rawValue,
+            profile.detectedType,
+            crmType,
+            mapping.fieldKey
+          );
+
+          if (result.normalized && String(rawValue === undefined || rawValue === null ? '' : rawValue).trim()) {
+            normalizedCount++;
+          }
+
+          record[mapping.fieldKey] = result.value;
         });
 
         Object.keys(this.state.unusedColumnActions).forEach((csvHeader) => {
@@ -628,14 +673,24 @@
             return;
           }
 
-          const value = row[csvHeader];
-          record.customFields[customName] =
-            value === undefined || value === null ? '' : String(value).trim();
+          const rawValue = row[csvHeader];
+          const result = ImportTypes.normalizeValue(
+            rawValue,
+            (this.state.columnProfiles[csvHeader] || {}).detectedType,
+            ImportTypes.DATA_TYPES.TEXT
+          );
+
+          if (result.normalized && String(rawValue === undefined || rawValue === null ? '' : rawValue).trim()) {
+            normalizedCount++;
+          }
+
+          record.customFields[customName] = result.value;
         });
 
         return record;
       });
 
+      this.state.importSummary = this.computeImportSummary_(normalizedCount);
       this.state.validation = this.validatePreviewRows_();
     },
 
@@ -687,7 +742,9 @@
           }
 
           if (column.type === 'number' || column.type === 'integer') {
-            if (!Number.isFinite(Number(value))) {
+            const numeric = ImportTypes.parseNumber(String(value));
+
+            if (numeric === null) {
               blocking.push({
                 row: rowIndex + 1,
                 field: column.header,
@@ -745,6 +802,12 @@
 
         if (mapping.confidence === 'fuzzy' || mapping.confidence === 'contains') {
           warnings.push('Review mapping for ' + mapping.header + ' ← ' + mapping.csvHeader + '.');
+        }
+
+        const compatWarning = this.getMappingCompatibilityWarning_(mapping);
+
+        if (compatWarning) {
+          warnings.push('⚠ ' + compatWarning + ' (' + mapping.header + ' ← ' + mapping.csvHeader + ')');
         }
       });
 
@@ -830,6 +893,196 @@
       }
 
       return row[column.fieldKey];
+    },
+
+    getSchemaColumn_(fieldKey) {
+      return this.state.schema.columns.find((column) => column.fieldKey === fieldKey);
+    },
+
+    buildColumnProfiles_() {
+      const profiles = {};
+
+      this.state.csvHeaders.forEach((header) => {
+        const values = this.state.csvRows.map((row) => row[header]);
+        profiles[header] = ImportTypes.analyzeColumn(values);
+      });
+
+      this.state.columnProfiles = profiles;
+    },
+
+    getMappingCompatibilityWarning_(mapping) {
+      if (!mapping || !mapping.csvHeader) {
+        return '';
+      }
+
+      const profile = this.state.columnProfiles[mapping.csvHeader];
+      const column = this.getSchemaColumn_(mapping.fieldKey);
+
+      if (!profile || !column) {
+        return '';
+      }
+
+      return ImportTypes.getCompatibilityWarning(profile.detectedType, ImportTypes.getCrmDataType(column));
+    },
+
+    renderTypeBadge_(csvHeader) {
+      const profile = this.state.columnProfiles[csvHeader];
+
+      if (!profile || !profile.detectedLabel) {
+        return '';
+      }
+
+      return `<span class="import-type-badge">${this.escapeHtml_(profile.detectedLabel)}</span>`;
+    },
+
+    renderColumnInfoTrigger_(csvHeader) {
+      const profile = this.state.columnProfiles[csvHeader] || {
+        sample: '',
+        populatedCount: 0,
+        detectedLabel: 'Unknown'
+      };
+      const sampleDisplay = profile.sample ? this.escapeHtml_(profile.sample) : '—';
+
+      return `
+        <span class="import-column-info" data-column-info-wrap="${this.escapeHtml_(csvHeader)}">
+          <button
+            type="button"
+            class="import-column-info__button"
+            data-column-info="${this.escapeHtml_(csvHeader)}"
+            aria-label="View sample data for ${this.escapeHtml_(csvHeader)}"
+          >i</button>
+          <span class="import-column-info__popover" role="tooltip">
+            <strong class="import-column-info__title">${this.escapeHtml_(csvHeader)}</strong>
+            <span class="import-column-info__line">Sample: <em>${sampleDisplay}</em></span>
+            <span class="import-column-info__line">Detected: ${this.escapeHtml_(profile.detectedLabel)}</span>
+            <span class="import-column-info__line">Rows with data: ${profile.populatedCount}</span>
+          </span>
+        </span>
+      `;
+    },
+
+    bindColumnInfoPopovers_(root) {
+      root.querySelectorAll('[data-column-info]').forEach((button) => {
+        button.addEventListener('click', (event) => {
+          event.stopPropagation();
+          const wrap = button.closest('[data-column-info-wrap]');
+          const isOpen = wrap && wrap.classList.contains('is-open');
+
+          root.querySelectorAll('.import-column-info.is-open').forEach((item) => {
+            item.classList.remove('is-open');
+          });
+
+          if (wrap && !isOpen) {
+            wrap.classList.add('is-open');
+          }
+        });
+      });
+
+      if (!this.columnInfoOutsideClickBound_) {
+        document.addEventListener('click', () => {
+          document.querySelectorAll('.import-column-info.is-open').forEach((item) => {
+            item.classList.remove('is-open');
+          });
+        });
+
+        this.columnInfoOutsideClickBound_ = true;
+      }
+    },
+
+    computeImportSummary_(normalizedCount) {
+      let autoMapped = 0;
+      let manuallyMapped = 0;
+      let compatibilityWarnings = 0;
+
+      this.state.crmMappings.forEach((mapping) => {
+        if (!mapping.csvHeader) {
+          return;
+        }
+
+        if (
+          mapping.confidence === 'exact' ||
+          mapping.confidence === 'synonym' ||
+          mapping.confidence === 'contains' ||
+          mapping.confidence === 'fuzzy'
+        ) {
+          autoMapped++;
+        } else {
+          manuallyMapped++;
+        }
+
+        if (this.getMappingCompatibilityWarning_(mapping)) {
+          compatibilityWarnings++;
+        }
+      });
+
+      let customFields = 0;
+      const customSeen = {};
+
+      Object.keys(this.state.unusedColumnActions).forEach((csvHeader) => {
+        const action = this.state.unusedColumnActions[csvHeader];
+
+        if (!action || action.action !== 'custom') {
+          return;
+        }
+
+        const name = String(action.customFieldName || '').trim().toLowerCase();
+
+        if (!name || customSeen[name]) {
+          return;
+        }
+
+        customSeen[name] = true;
+        customFields++;
+      });
+
+      return {
+        autoMapped: autoMapped,
+        manuallyMapped: manuallyMapped,
+        customFields: customFields,
+        normalizedValues: normalizedCount,
+        compatibilityWarnings: compatibilityWarnings
+      };
+    },
+
+    renderImportSummary_() {
+      const summary = this.state.importSummary;
+
+      if (!summary) {
+        return '';
+      }
+
+      const items = [];
+
+      if (summary.autoMapped) {
+        items.push(`<li>${summary.autoMapped} field${summary.autoMapped === 1 ? '' : 's'} auto-mapped</li>`);
+      }
+
+      if (summary.manuallyMapped) {
+        items.push(`<li>${summary.manuallyMapped} field${summary.manuallyMapped === 1 ? '' : 's'} manually mapped</li>`);
+      }
+
+      if (summary.customFields) {
+        items.push(`<li>${summary.customFields} custom field${summary.customFields === 1 ? '' : 's'} to be created</li>`);
+      }
+
+      if (summary.normalizedValues) {
+        items.push(`<li>${summary.normalizedValues} value${summary.normalizedValues === 1 ? '' : 's'} automatically normalized</li>`);
+      }
+
+      if (summary.compatibilityWarnings) {
+        items.push(`<li class="import-summary__warning">${summary.compatibilityWarnings} compatibility warning${summary.compatibilityWarnings === 1 ? '' : 's'}</li>`);
+      }
+
+      if (!items.length) {
+        return '';
+      }
+
+      return `
+        <div class="import-summary">
+          <p class="import-summary__title">Import summary</p>
+          <ul class="import-summary__list">${items.join('')}</ul>
+        </div>
+      `;
     },
 
     getImportPayload_() {

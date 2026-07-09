@@ -117,8 +117,9 @@ function validateImportRecords_(moduleId, records, schema) {
 
       if (column.type === 'number' || column.type === 'integer') {
         const trimmed = String(value).trim();
+        const numeric = parseImportNumber_(trimmed);
 
-        if (trimmed && !Number.isFinite(Number(trimmed))) {
+        if (trimmed && numeric === null) {
           errors.push({
             row: rowIndex + 1,
             field: column.header,
@@ -199,6 +200,10 @@ function normalizeImportRecord_(record, schema) {
   }, {});
 
   Object.keys(payload).forEach((fieldKey) => {
+    if (fieldKey === 'customFields') {
+      return;
+    }
+
     const column = columnsByKey[fieldKey];
     const value = payload[fieldKey];
 
@@ -206,9 +211,18 @@ function normalizeImportRecord_(record, schema) {
       return;
     }
 
+    const normalized = normalizeImportValue_(
+      value,
+      IMPORT_DATA_TYPES.TEXT,
+      column.dataType || getCrmDataType_(fieldKey, column.type),
+      fieldKey
+    );
+
+    payload[fieldKey] = normalized.value;
+
     if (column.type === 'dropdown' && column.options.length) {
       const match = column.options.find(
-        (option) => option.toLowerCase() === String(value).trim().toLowerCase()
+        (option) => option.toLowerCase() === String(payload[fieldKey]).trim().toLowerCase()
       );
 
       if (match) {
@@ -216,6 +230,19 @@ function normalizeImportRecord_(record, schema) {
       }
     }
   });
+
+  if (payload.customFields) {
+    Object.keys(payload.customFields).forEach((header) => {
+      const value = payload.customFields[header];
+
+      if (value === '' || value === null || value === undefined) {
+        return;
+      }
+
+      const normalized = normalizeImportValue_(value, IMPORT_DATA_TYPES.TEXT, IMPORT_DATA_TYPES.TEXT);
+      payload.customFields[header] = normalized.value;
+    });
+  }
 
   return payload;
 }
