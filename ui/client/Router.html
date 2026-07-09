@@ -83,6 +83,10 @@
         return module.label;
       }
 
+      if (page === 'import') {
+        return 'Bulk Import';
+      }
+
       return PAGE_TITLES[page] || 'Dashboard';
     },
 
@@ -186,8 +190,14 @@
         return;
       }
 
-      if (['search', 'filters', 'import', 'export'].includes(page)) {
+      if (['search', 'filters', 'export'].includes(page)) {
         root.innerHTML = Forms.renderUtilityPage(page);
+        return;
+      }
+
+      if (page === 'import') {
+        Import.prepare();
+        Import.render(root);
       }
     },
 

@@ -1,0 +1,900 @@
+<script>
+  const Import = {
+    state: {
+      step: 'upload',
+      schema: null,
+      fileName: '',
+      csvHeaders: [],
+      csvRows: [],
+      mappings: [],
+      previewRows: [],
+      validation: {
+        blocking: [],
+        warnings: []
+      },
+      importResult: null,
+      isLoading: false
+    },
+
+    render(root) {
+      if (!this.state.schema && !this.state.isLoading) {
+        this.loadSchema_(root);
+        return;
+      }
+
+      if (this.state.isLoading) {
+        root.innerHTML = this.renderLoading_();
+        return;
+      }
+
+      if (this.state.step === 'upload') {
+        root.innerHTML = this.renderUpload_();
+      } else if (this.state.step === 'mapping') {
+        root.innerHTML = this.renderMapping_();
+      } else if (this.state.step === 'preview') {
+        root.innerHTML = this.renderPreview_();
+      } else if (this.state.step === 'done') {
+        root.innerHTML = this.renderDone_();
+      }
+
+      this.bindEvents_(root);
+    },
+
+    reset() {
+      const schema = this.state.schema;
+      this.state = {
+        step: 'upload',
+        schema: schema,
+        fileName: '',
+        csvHeaders: [],
+        csvRows: [],
+        mappings: [],
+        previewRows: [],
+        validation: { blocking: [], warnings: [] },
+        importResult: null,
+        isLoading: false
+      };
+    },
+
+    prepare() {
+      this.reset();
+    },
+
+    loadSchema_(root) {
+      const module = AppStore.getModule();
+
+      if (!module) {
+        root.innerHTML = Forms.renderMessagePage(
+          'Import Unavailable',
+          'Switch to Artworks, Contacts, or Collections to import records.'
+        );
+        return;
+      }
+
+      this.state.isLoading = true;
+      root.innerHTML = this.renderLoading_();
+
+      google.script.run
+        .withSuccessHandler((schema) => {
+          this.state.schema = schema;
+          this.state.isLoading = false;
+          this.render(root);
+        })
+        .withFailureHandler((error) => {
+          this.state.isLoading = false;
+          root.innerHTML = Forms.renderMessagePage('Import Error', error.message);
+        })
+        .getImportSchema(module.id);
+    },
+
+    renderLoading_() {
+      return `
+        <div class="card card--message">
+          <h2>Bulk Import</h2>
+          <p class="status">Loading import settings...</p>
+        </div>
+      `;
+    },
+
+    renderUpload_() {
+      const module = AppStore.getModule();
+
+      return `
+        <div class="import-flow">
+          <div class="card">
+            <h2>Bulk Import</h2>
+            <p>Upload a CSV file to import into <strong>${module.label}</strong>. Column mapping uses this sheet's headers automatically.</p>
+
+            <div class="field field--file">
+              <label for="import-csv-file">CSV File</label>
+              <input
+                id="import-csv-file"
+                type="file"
+                accept=".csv,text/csv"
+              >
+              <p class="field-hint">CSV only for now. Excel files are not supported yet.</p>
+            </div>
+
+            ${this.state.fileName ? `<p class="import-meta">Selected: ${this.escapeHtml_(this.state.fileName)} (${this.state.csvRows.length} rows)</p>` : ''}
+          </div>
+        </div>
+      `;
+    },
+
+    renderMapping_() {
+      const mappedCount = this.state.mappings.filter((mapping) => !mapping.ignored && mapping.targetHeader).length;
+      const needsReview = this.state.mappings.filter(
+        (mapping) => !mapping.ignored && mapping.confidence !== 'exact' && mapping.confidence !== 'synonym'
+      ).length;
+
+      return `
+        <div class="import-flow">
+          <div class="card">
+            <h2>Map Columns</h2>
+            <p>Review how CSV columns map to <strong>${this.state.schema.moduleLabel}</strong> fields. Adjust uncertain matches before importing.</p>
+            <p class="import-meta">${mappedCount} mapped · ${needsReview} need review · ${this.state.csvRows.length} rows</p>
+
+            <div class="import-mapping-list">
+              ${this.state.mappings
+                .map((mapping, index) => this.renderMappingRow_(mapping, index))
+                .join('')}
+            </div>
+
+            ${this.renderMappingIssues_()}
+
+            <div class="import-actions">
+              <button type="button" class="button-secondary" data-import-action="back-upload">Back</button>
+              <button type="button" class="button-primary button-primary--inline" data-import-action="preview">Continue to Preview</button>
+            </div>
+          </div>
+        </div>
+      `;
+    },
+
+    renderMappingRow_(mapping, index) {
+      const options = this.state.schema.columns
+        .map((column) => {
+          const selected = mapping.targetHeader === column.header ? 'selected' : '';
+          return `<option value="${this.escapeHtml_(column.header)}" ${selected}>${this.escapeHtml_(column.header)}</option>`;
+        })
+        .join('');
+
+      const confidenceClass = 'import-confidence import-confidence--' + (mapping.confidence || 'manual');
+      const confidenceLabel = this.getConfidenceLabel_(mapping);
+
+      return `
+        <div class="import-mapping-row" data-mapping-index="${index}">
+          <div class="import-mapping-row__csv">
+            <span class="import-mapping-label">CSV column</span>
+            <strong>${this.escapeHtml_(mapping.csvHeader)}</strong>
+          </div>
+
+          <div class="import-mapping-row__target">
+            <label class="import-mapping-label" for="import-map-${index}">CRM field</label>
+            <select id="import-map-${index}" data-mapping-select="${index}" ${mapping.ignored ? 'disabled' : ''}>
+              <option value="">Ignore column</option>
+              ${options}
+            </select>
+          </div>
+
+          <div class="import-mapping-row__meta">
+            <span class="${confidenceClass}">${confidenceLabel}</span>
+            <label class="import-ignore-toggle">
+              <input type="checkbox" data-mapping-ignore="${index}" ${mapping.ignored ? 'checked' : ''}>
+              Ignore
+            </label>
+          </div>
+        </div>
+      `;
+    },
+
+    renderMappingIssues_() {
+      const issues = this.getMappingValidation_();
+
+      if (!issues.blocking.length && !issues.warnings.length) {
+        return '';
+      }
+
+      const blocking = issues.blocking
+        .map((issue) => `<li class="import-issue import-issue--error">${this.escapeHtml_(issue)}</li>`)
+        .join('');
+      const warnings = issues.warnings
+        .map((issue) => `<li class="import-issue import-issue--warning">${this.escapeHtml_(issue)}</li>`)
+        .join('');
+
+      return `
+        <div class="import-issues">
+          ${blocking ? `<ul class="import-issue-list">${blocking}</ul>` : ''}
+          ${warnings ? `<ul class="import-issue-list import-issue-list--warnings">${warnings}</ul>` : ''}
+        </div>
+      `;
+    },
+
+    renderPreview_() {
+      const previewColumns = this.getPreviewColumns_();
+      const issues = this.state.validation;
+      const canImport = issues.blocking.length === 0 && this.state.previewRows.length > 0;
+      const previewLimit = Math.min(this.state.previewRows.length, 25);
+
+      const headerCells = previewColumns
+        .map((column) => `<th>${this.escapeHtml_(column.header)}</th>`)
+        .join('');
+
+      const bodyRows = this.state.previewRows
+        .slice(0, previewLimit)
+        .map((row, rowIndex) => {
+          const cells = previewColumns
+            .map((column) => {
+              const value = row[column.fieldKey];
+              const display = value === undefined || value === null ? '' : String(value);
+              const hasError = issues.blocking.some(
+                (issue) => issue.row === rowIndex + 1 && issue.field === column.header
+              );
+              const cellClass = hasError ? 'import-preview-cell import-preview-cell--error' : 'import-preview-cell';
+              return `<td class="${cellClass}">${this.escapeHtml_(display)}</td>`;
+            })
+            .join('');
+
+          return `<tr>${cells}</tr>`;
+        })
+        .join('');
+
+      const blocking = issues.blocking
+        .slice(0, 12)
+        .map(
+          (issue) =>
+            `<li class="import-issue import-issue--error">Row ${issue.row}, ${this.escapeHtml_(issue.field)}: ${this.escapeHtml_(issue.message)}</li>`
+        )
+        .join('');
+
+      return `
+        <div class="import-flow">
+          <div class="card">
+            <h2>Preview Import</h2>
+            <p class="import-meta">${this.state.previewRows.length} rows ready · ${previewColumns.length} CRM fields mapped</p>
+
+            ${issues.blocking.length ? `<ul class="import-issue-list">${blocking}</ul>` : '<p class="status">All mapped rows passed validation.</p>'}
+
+            <div class="import-preview-wrap">
+              <table class="import-preview-table">
+                <thead><tr>${headerCells}</tr></thead>
+                <tbody>${bodyRows}</tbody>
+              </table>
+            </div>
+
+            ${this.state.previewRows.length > previewLimit ? `<p class="field-hint">Showing first ${previewLimit} rows.</p>` : ''}
+
+            <div class="import-actions">
+              <button type="button" class="button-secondary" data-import-action="back-mapping">Back</button>
+              <button type="button" class="button-primary button-primary--inline" data-import-action="confirm" ${canImport ? '' : 'disabled'}>
+                Import ${this.state.previewRows.length} Records
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+    },
+
+    renderDone_() {
+      const result = this.state.importResult || {};
+
+      return `
+        <div class="import-flow">
+          <div class="card card--message">
+            <h2>Import Complete</h2>
+            <p>${this.escapeHtml_(result.message || 'Import finished.')}</p>
+            <div class="import-actions import-actions--single">
+              <button type="button" class="button-primary button-primary--inline" data-import-action="done">Back to Dashboard</button>
+            </div>
+          </div>
+        </div>
+      `;
+    },
+
+    bindEvents_(root) {
+      const fileInput = root.querySelector('#import-csv-file');
+
+      if (fileInput) {
+        fileInput.addEventListener('change', (event) => {
+          this.handleFileSelected_(event.target.files[0], root);
+        });
+      }
+
+      root.querySelectorAll('[data-mapping-select]').forEach((select) => {
+        select.addEventListener('change', (event) => {
+          const index = Number(event.target.getAttribute('data-mapping-select'));
+          this.updateMappingTarget_(index, event.target.value);
+          this.render(root);
+        });
+      });
+
+      root.querySelectorAll('[data-mapping-ignore]').forEach((checkbox) => {
+        checkbox.addEventListener('change', (event) => {
+          const index = Number(event.target.getAttribute('data-mapping-ignore'));
+          this.updateMappingIgnored_(index, event.target.checked);
+          this.render(root);
+        });
+      });
+
+      root.querySelectorAll('[data-import-action]').forEach((button) => {
+        button.addEventListener('click', () => {
+          this.handleAction_(button.getAttribute('data-import-action'), root);
+        });
+      });
+    },
+
+    handleAction_(action, root) {
+      if (action === 'back-upload') {
+        this.state.step = 'upload';
+        this.render(root);
+        return;
+      }
+
+      if (action === 'preview') {
+        const issues = this.getMappingValidation_();
+
+        if (issues.blocking.length) {
+          Toast.show(issues.blocking[0], 'error');
+          return;
+        }
+
+        this.buildPreview_();
+        this.state.step = 'preview';
+        this.render(root);
+        return;
+      }
+
+      if (action === 'back-mapping') {
+        this.state.step = 'mapping';
+        this.render(root);
+        return;
+      }
+
+      if (action === 'confirm') {
+        this.runImport_(root);
+        return;
+      }
+
+      if (action === 'done') {
+        this.reset();
+        Actions.refreshContext();
+      }
+    },
+
+    handleFileSelected_(file, root) {
+      if (!file) {
+        return;
+      }
+
+      const reader = new FileReader();
+
+      reader.onload = () => {
+        try {
+          const parsed = this.parseCsv_(String(reader.result || ''));
+          this.state.fileName = file.name;
+          this.state.csvHeaders = parsed.headers;
+          this.state.csvRows = parsed.rows;
+          this.state.mappings = this.autoMapColumns_(parsed.headers, this.state.schema);
+          this.state.step = 'mapping';
+          this.render(root);
+        } catch (error) {
+          Toast.show(error.message, 'error');
+        }
+      };
+
+      reader.onerror = () => {
+        Toast.show('Could not read the CSV file.', 'error');
+      };
+
+      reader.readAsText(file);
+    },
+
+    updateMappingTarget_(index, targetHeader) {
+      const mapping = this.state.mappings[index];
+
+      if (!mapping) {
+        return;
+      }
+
+      mapping.targetHeader = targetHeader;
+      mapping.fieldKey = this.getFieldKeyForHeader_(targetHeader);
+      mapping.ignored = !targetHeader;
+      mapping.confidence = targetHeader ? 'manual' : 'ignored';
+    },
+
+    updateMappingIgnored_(index, ignored) {
+      const mapping = this.state.mappings[index];
+
+      if (!mapping) {
+        return;
+      }
+
+      mapping.ignored = ignored;
+
+      if (ignored) {
+        mapping.targetHeader = '';
+        mapping.fieldKey = '';
+        mapping.confidence = 'ignored';
+      }
+    },
+
+    buildPreview_() {
+      const activeMappings = this.state.mappings.filter(
+        (mapping) => !mapping.ignored && mapping.targetHeader
+      );
+
+      this.state.previewRows = this.state.csvRows.map((row) => {
+        const record = {};
+
+        activeMappings.forEach((mapping) => {
+          const value = row[mapping.csvHeader];
+          record[mapping.fieldKey] = value === undefined || value === null ? '' : String(value).trim();
+        });
+
+        return record;
+      });
+
+      this.state.validation = this.validatePreviewRows_();
+    },
+
+    validatePreviewRows_() {
+      const blocking = [];
+      const warnings = [];
+      const mappingIssues = this.getMappingValidation_();
+
+      blocking.push.apply(blocking, mappingIssues.blocking.map((message) => ({
+        row: 0,
+        field: 'Mapping',
+        message: message
+      })));
+      warnings.push.apply(warnings, mappingIssues.warnings);
+
+      const columnsByKey = this.state.schema.columns.reduce((acc, column) => {
+        acc[column.fieldKey] = column;
+        return acc;
+      }, {});
+
+      this.state.previewRows.forEach((record, rowIndex) => {
+        this.state.schema.columns.forEach((column) => {
+          if (!column.required) {
+            return;
+          }
+
+          if (!String(record[column.fieldKey] || '').trim()) {
+            blocking.push({
+              row: rowIndex + 1,
+              field: column.header,
+              message: column.header + ' is required.'
+            });
+          }
+        });
+
+        Object.keys(record).forEach((fieldKey) => {
+          const column = columnsByKey[fieldKey];
+          const value = record[fieldKey];
+
+          if (!column || !String(value || '').trim()) {
+            return;
+          }
+
+          if (column.type === 'number' || column.type === 'integer') {
+            if (!Number.isFinite(Number(value))) {
+              blocking.push({
+                row: rowIndex + 1,
+                field: column.header,
+                message: column.header + ' must be a number.'
+              });
+            }
+          }
+
+          if (column.type === 'dropdown' && column.options.length) {
+            const match = column.options.some(
+              (option) => option.toLowerCase() === String(value).trim().toLowerCase()
+            );
+
+            if (!match) {
+              blocking.push({
+                row: rowIndex + 1,
+                field: column.header,
+                message: column.header + ' has an invalid value.'
+              });
+            }
+          }
+
+          if (fieldKey === 'email' && String(value).indexOf('@') === -1) {
+            blocking.push({
+              row: rowIndex + 1,
+              field: column.header,
+              message: column.header + ' must be a valid email.'
+            });
+          }
+        });
+      });
+
+      return { blocking: blocking, warnings: warnings };
+    },
+
+    getMappingValidation_() {
+      const blocking = [];
+      const warnings = [];
+      const usedTargets = {};
+      const mappedFieldKeys = {};
+
+      this.state.mappings.forEach((mapping) => {
+        if (mapping.ignored || !mapping.targetHeader) {
+          return;
+        }
+
+        if (usedTargets[mapping.targetHeader]) {
+          blocking.push('Duplicate mapping: multiple CSV columns map to ' + mapping.targetHeader + '.');
+        }
+
+        usedTargets[mapping.targetHeader] = true;
+        mappedFieldKeys[mapping.fieldKey] = true;
+      });
+
+      this.state.schema.columns.forEach((column) => {
+        if (column.required && !mappedFieldKeys[column.fieldKey]) {
+          blocking.push('Required field "' + column.header + '" is not mapped.');
+        }
+      });
+
+      this.state.mappings.forEach((mapping) => {
+        if (mapping.ignored) {
+          return;
+        }
+
+        if (mapping.confidence === 'fuzzy' || mapping.confidence === 'contains') {
+          warnings.push('Review mapping for "' + mapping.csvHeader + '" → ' + mapping.targetHeader + '.');
+        }
+      });
+
+      return { blocking: blocking, warnings: warnings };
+    },
+
+    getPreviewColumns_() {
+      const keys = [];
+
+      return this.state.schema.columns.filter((column) => {
+        const isMapped = this.state.mappings.some(
+          (mapping) => !mapping.ignored && mapping.fieldKey === column.fieldKey
+        );
+
+        if (!isMapped || keys.indexOf(column.fieldKey) !== -1) {
+          return false;
+        }
+
+        keys.push(column.fieldKey);
+        return true;
+      });
+    },
+
+    runImport_(root) {
+      const module = AppStore.getModule();
+      const confirmButton = root.querySelector('[data-import-action="confirm"]');
+
+      if (confirmButton) {
+        confirmButton.disabled = true;
+        confirmButton.textContent = 'Importing...';
+      }
+
+      google.script.run
+        .withSuccessHandler((result) => {
+          if (!result.success) {
+            this.state.validation.blocking = result.errors || [];
+            Toast.show(result.message || 'Import failed.', 'error');
+            this.render(root);
+            return;
+          }
+
+          this.state.importResult = result;
+          this.state.step = 'done';
+          Toast.show(result.message, 'success');
+          this.render(root);
+        })
+        .withFailureHandler((error) => {
+          Toast.show(error.message, 'error');
+          this.render(root);
+        })
+        .importModuleRecords(module.id, this.state.previewRows);
+    },
+
+    autoMapColumns_(csvHeaders, schema) {
+      const candidates = [];
+      const usedTargets = {};
+
+      csvHeaders.forEach((csvHeader) => {
+        schema.columns.forEach((column) => {
+          const match = this.scoreHeaderMatch_(csvHeader, column, schema.synonyms[column.fieldKey] || []);
+          candidates.push({
+            csvHeader: csvHeader,
+            targetHeader: column.header,
+            fieldKey: column.fieldKey,
+            confidence: match.confidence,
+            score: match.score
+          });
+        });
+      });
+
+      candidates.sort((a, b) => b.score - a.score);
+
+      const mappingByCsv = {};
+
+      candidates.forEach((candidate) => {
+        if (mappingByCsv[candidate.csvHeader] || usedTargets[candidate.targetHeader]) {
+          return;
+        }
+
+        if (candidate.score < 60) {
+          return;
+        }
+
+        mappingByCsv[candidate.csvHeader] = {
+          csvHeader: candidate.csvHeader,
+          targetHeader: candidate.targetHeader,
+          fieldKey: candidate.fieldKey,
+          confidence: candidate.confidence,
+          ignored: false
+        };
+        usedTargets[candidate.targetHeader] = true;
+      });
+
+      return csvHeaders.map((csvHeader) => {
+        return (
+          mappingByCsv[csvHeader] || {
+            csvHeader: csvHeader,
+            targetHeader: '',
+            fieldKey: '',
+            confidence: 'none',
+            ignored: false
+          }
+        );
+      });
+    },
+
+    scoreHeaderMatch_(csvHeader, column, synonyms) {
+      const csvNorm = this.normalizeHeader_(csvHeader);
+      const headerNorm = this.normalizeHeader_(column.header);
+      const labelNorm = this.normalizeHeader_(column.label);
+      const fieldNorm = this.normalizeHeader_(column.fieldKey);
+
+      if (!csvNorm) {
+        return { score: 0, confidence: 'none' };
+      }
+
+      if (csvNorm === headerNorm || csvNorm === labelNorm || csvNorm === fieldNorm) {
+        return { score: 100, confidence: 'exact' };
+      }
+
+      const synonymList = (synonyms || []).map((item) => this.normalizeHeader_(item));
+
+      if (synonymList.indexOf(csvNorm) !== -1) {
+        return { score: 92, confidence: 'synonym' };
+      }
+
+      if (csvNorm.indexOf(headerNorm) !== -1 || headerNorm.indexOf(csvNorm) !== -1) {
+        return { score: 78, confidence: 'contains' };
+      }
+
+      if (csvNorm.indexOf(labelNorm) !== -1 || labelNorm.indexOf(csvNorm) !== -1) {
+        return { score: 74, confidence: 'contains' };
+      }
+
+      const fuzzyTargets = [headerNorm, labelNorm, fieldNorm].concat(synonymList);
+      let bestRatio = 0;
+
+      fuzzyTargets.forEach((target) => {
+        const ratio = this.fuzzyRatio_(csvNorm, target);
+        if (ratio > bestRatio) {
+          bestRatio = ratio;
+        }
+      });
+
+      if (bestRatio >= 0.82) {
+        return { score: Math.round(bestRatio * 90), confidence: 'fuzzy' };
+      }
+
+      return { score: 0, confidence: 'none' };
+    },
+
+    normalizeHeader_(value) {
+      const base = String(value || '')
+        .toLowerCase()
+        .trim()
+        .replace(/[_\-\.]+/g, ' ')
+        .replace(/[^\w\s]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      return base
+        .split(' ')
+        .map((word) => this.singularize_(word))
+        .join(' ');
+    },
+
+    singularize_(word) {
+      if (word.length < 4) {
+        return word;
+      }
+
+      if (word.slice(-3) === 'ies') {
+        return word.slice(0, -3) + 'y';
+      }
+
+      if (word.slice(-2) === 'es' && word.length > 4) {
+        return word.slice(0, -2);
+      }
+
+      if (word.slice(-1) === 's') {
+        return word.slice(0, -1);
+      }
+
+      return word;
+    },
+
+    fuzzyRatio_(a, b) {
+      if (!a || !b) {
+        return 0;
+      }
+
+      if (a === b) {
+        return 1;
+      }
+
+      const distance = this.levenshtein_(a, b);
+      const maxLen = Math.max(a.length, b.length);
+
+      return maxLen ? 1 - distance / maxLen : 0;
+    },
+
+    levenshtein_(a, b) {
+      const rows = a.length + 1;
+      const cols = b.length + 1;
+      const matrix = [];
+
+      for (let i = 0; i < rows; i++) {
+        matrix[i] = [i];
+      }
+
+      for (let j = 0; j < cols; j++) {
+        matrix[0][j] = j;
+      }
+
+      for (let i = 1; i < rows; i++) {
+        for (let j = 1; j < cols; j++) {
+          const cost = a.charAt(i - 1) === b.charAt(j - 1) ? 0 : 1;
+          matrix[i][j] = Math.min(
+            matrix[i - 1][j] + 1,
+            matrix[i][j - 1] + 1,
+            matrix[i - 1][j - 1] + cost
+          );
+        }
+      }
+
+      return matrix[a.length][b.length];
+    },
+
+    parseCsv_(text) {
+      const cleaned = text.replace(/^\uFEFF/, '');
+      const rows = [];
+      let row = [];
+      let field = '';
+      let inQuotes = false;
+
+      for (let i = 0; i < cleaned.length; i++) {
+        const char = cleaned.charAt(i);
+        const next = cleaned.charAt(i + 1);
+
+        if (inQuotes) {
+          if (char === '"' && next === '"') {
+            field += '"';
+            i++;
+          } else if (char === '"') {
+            inQuotes = false;
+          } else {
+            field += char;
+          }
+          continue;
+        }
+
+        if (char === '"') {
+          inQuotes = true;
+          continue;
+        }
+
+        if (char === ',') {
+          row.push(field);
+          field = '';
+          continue;
+        }
+
+        if (char === '\n' || (char === '\r' && next === '\n')) {
+          row.push(field);
+          field = '';
+
+          if (row.some((cell) => String(cell).trim())) {
+            rows.push(row);
+          }
+
+          row = [];
+
+          if (char === '\r') {
+            i++;
+          }
+
+          continue;
+        }
+
+        if (char !== '\r') {
+          field += char;
+        }
+      }
+
+      row.push(field);
+
+      if (row.some((cell) => String(cell).trim())) {
+        rows.push(row);
+      }
+
+      if (!rows.length) {
+        throw new Error('The CSV file is empty.');
+      }
+
+      const headers = rows[0].map((header) => String(header).trim());
+
+      if (!headers.some((header) => header)) {
+        throw new Error('The CSV file is missing a header row.');
+      }
+
+      const dataRows = rows.slice(1).map((cells) => {
+        const record = {};
+
+        headers.forEach((header, index) => {
+          if (!header) {
+            return;
+          }
+
+          record[header] = cells[index] === undefined ? '' : String(cells[index]).trim();
+        });
+
+        return record;
+      });
+
+      return { headers: headers, rows: dataRows };
+    },
+
+    getFieldKeyForHeader_(header) {
+      const column = this.state.schema.columns.find((item) => item.header === header);
+      return column ? column.fieldKey : '';
+    },
+
+    getConfidenceLabel_(mapping) {
+      if (mapping.ignored || mapping.confidence === 'ignored') {
+        return 'Ignored';
+      }
+
+      if (!mapping.targetHeader) {
+        return 'Unmapped';
+      }
+
+      const labels = {
+        exact: 'Exact match',
+        synonym: 'Synonym match',
+        contains: 'Likely match',
+        fuzzy: 'Fuzzy match',
+        manual: 'Manual mapping',
+        none: 'Needs review'
+      };
+
+      return labels[mapping.confidence] || 'Needs review';
+    },
+
+    escapeHtml_(value) {
+      return String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+  };
+</script>

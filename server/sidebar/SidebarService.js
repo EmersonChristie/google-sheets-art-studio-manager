@@ -117,7 +117,7 @@ function getUtilityLabels_(module) {
   const labels = {
     search: 'Search',
     filters: 'Filters',
-    import: 'Import',
+    import: 'Bulk Import',
     export: 'Export'
   };
 
