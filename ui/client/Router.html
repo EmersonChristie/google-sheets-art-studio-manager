@@ -25,10 +25,6 @@
         this.goToDashboard();
       });
 
-      document.getElementById('refresh-button').addEventListener('click', () => {
-        Actions.refreshContext();
-      });
-
       document.getElementById('cancel-button').addEventListener('click', () => {
         if (AppStore.page === 'edit') {
           Actions.refreshContext();
@@ -53,13 +49,9 @@
       const module = AppStore.getModule();
       const page = AppStore.page;
       const showBack = !['dashboard', 'setup', 'unsupported'].includes(page);
-      const showRefresh =
-        AppStore.isSetupComplete() &&
-        module &&
-        !AppStore.bootstrap.isSettingsModule;
 
+      document.getElementById('shell-header-top').hidden = !showBack;
       document.getElementById('back-button').hidden = !showBack;
-      document.getElementById('refresh-button').hidden = !showRefresh;
       document.getElementById('module-eyebrow').textContent = module
         ? module.label
         : AppStore.bootstrap.activeSheetName;
@@ -228,6 +220,7 @@
       }
 
       footer.hidden = true;
+      saveButton.hidden = true;
     },
 
     openPage(page) {

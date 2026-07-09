@@ -87,6 +87,10 @@
     },
 
     shouldBlockPollNavigation_() {
+      if (this.pinToDashboard) {
+        return true;
+      }
+
       if (this.pinnedPages.includes(this.page)) {
         return true;
       }
