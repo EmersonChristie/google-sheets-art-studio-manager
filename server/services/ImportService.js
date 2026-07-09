@@ -8,15 +8,29 @@ function getImportSchema(moduleId) {
 
 /**
  * @param {string} moduleId
- * @param {Array<object>} records
+ * @param {object} payload
  * @returns {object}
  */
-function importModuleRecords(moduleId, records) {
-  if (!records || !records.length) {
+function importModuleRecords(moduleId, payload) {
+  const records = payload && payload.records ? payload.records : [];
+  const customFieldHeaders = payload && payload.customFieldHeaders ? payload.customFieldHeaders : [];
+
+  if (!records.length) {
     throw new Error('No records to import.');
   }
 
   const schema = getImportSchemaForModule(moduleId);
+  const mappingValidation = validateImportCustomFields_(moduleId, customFieldHeaders);
+
+  if (!mappingValidation.valid) {
+    return {
+      success: false,
+      imported: 0,
+      errors: mappingValidation.errors,
+      message: 'Import validation failed.'
+    };
+  }
+
   const validation = validateImportRecords_(moduleId, records, schema);
 
   if (!validation.valid) {
@@ -29,26 +43,39 @@ function importModuleRecords(moduleId, records) {
   }
 
   const sheet = getModuleSheet_(moduleId);
+  appendCustomFieldsToSheet_(sheet, customFieldHeaders);
+
   const startSequence = Math.max(sheet.getLastRow(), 1);
   const rows = records.map((record, index) => {
-    const payload = normalizeImportRecord_(record, schema);
+    const normalized = normalizeImportRecord_(record, schema);
 
-    if (!isNonEmptyString(payload.id)) {
-      payload.id = generateRecordIdForSequence_(moduleId, startSequence + index);
+    if (!isNonEmptyString(normalized.id)) {
+      normalized.id = generateRecordIdForSequence_(moduleId, startSequence + index);
     }
 
-    return buildRecordRow_(sheet, moduleId, payload);
+    return buildImportRecordRow_(sheet, moduleId, normalized);
   });
 
   const startRow = sheet.getLastRow() + 1;
   sheet.getRange(startRow, 1, rows.length, rows[0].length).setValues(rows);
   triggerDeployHook_();
 
+  const customNote =
+    customFieldHeaders.length > 0
+      ? ' Added ' + customFieldHeaders.length + ' custom field(s).'
+      : '';
+
   return {
     success: true,
     imported: rows.length,
     errors: [],
-    message: 'Imported ' + rows.length + ' ' + getModuleById(moduleId).label.toLowerCase() + '.'
+    message:
+      'Imported ' +
+      rows.length +
+      ' ' +
+      getModuleById(moduleId).label.toLowerCase() +
+      '.' +
+      customNote
   };
 }
 
@@ -191,4 +218,117 @@ function normalizeImportRecord_(record, schema) {
   });
 
   return payload;
+}
+
+/**
+ * @param {string} moduleId
+ * @param {string[]} customFieldHeaders
+ * @returns {{ valid: boolean, errors: Array<object> }}
+ */
+function validateImportCustomFields_(moduleId, customFieldHeaders) {
+  const errors = [];
+  const sheet = getModuleSheet_(moduleId);
+  const existingHeaders = getSheetHeaderRow_(sheet);
+  const seen = {};
+
+  customFieldHeaders.forEach((name) => {
+    const trimmed = String(name || '').trim();
+
+    if (!trimmed) {
+      errors.push({
+        row: 0,
+        field: 'Custom Field',
+        message: 'Custom field name cannot be blank.'
+      });
+      return;
+    }
+
+    const normalized = trimmed.toLowerCase();
+
+    if (seen[normalized]) {
+      errors.push({
+        row: 0,
+        field: trimmed,
+        message: 'Duplicate custom field name: ' + trimmed + '.'
+      });
+      return;
+    }
+
+    seen[normalized] = true;
+
+    if (existingHeaders.indexOf(trimmed) !== -1) {
+      errors.push({
+        row: 0,
+        field: trimmed,
+        message: 'Custom field "' + trimmed + '" already exists on this sheet.'
+      });
+    }
+  });
+
+  return {
+    valid: errors.length === 0,
+    errors: errors
+  };
+}
+
+/**
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet
+ * @param {string[]} customFieldHeaders
+ * @returns {string[]}
+ */
+function appendCustomFieldsToSheet_(sheet, customFieldHeaders) {
+  const names = (customFieldHeaders || [])
+    .map((name) => String(name || '').trim())
+    .filter(Boolean);
+
+  if (!names.length) {
+    return [];
+  }
+
+  const existingHeaders = getSheetHeaderRow_(sheet);
+  const toAdd = names.filter((name) => existingHeaders.indexOf(name) === -1);
+
+  if (!toAdd.length) {
+    return [];
+  }
+
+  const startCol = existingHeaders.length + 1;
+  sheet.getRange(1, startCol, 1, toAdd.length).setValues([toAdd]);
+  sheet.getRange(1, startCol, 1, toAdd.length).setFontWeight('bold');
+
+  return toAdd;
+}
+
+/**
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sheet
+ * @param {string} moduleId
+ * @param {object} record
+ * @returns {Array<string|number|boolean>}
+ */
+function buildImportRecordRow_(sheet, moduleId, record) {
+  const headers = getSheetHeaderRow_(sheet);
+  const fieldMap = getRecordHeaderFields_(moduleId);
+  const customFields = record.customFields || {};
+
+  return headers.map((header) => {
+    const field = fieldMap[header];
+
+    if (!header) {
+      return '';
+    }
+
+    if (field === 'select') {
+      return false;
+    }
+
+    if (field && Object.prototype.hasOwnProperty.call(record, field)) {
+      return formatRecordFieldValue_(field, record[field]);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(customFields, header)) {
+      return customFields[header] || '';
+    }
+
+    return '';
+  });
 }

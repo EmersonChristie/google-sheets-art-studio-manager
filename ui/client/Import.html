@@ -6,8 +6,10 @@
       fileName: '',
       csvHeaders: [],
       csvRows: [],
-      mappings: [],
+      crmMappings: [],
+      unusedColumnActions: {},
       previewRows: [],
+      previewColumns: [],
       validation: {
         blocking: [],
         warnings: []
@@ -48,8 +50,10 @@
         fileName: '',
         csvHeaders: [],
         csvRows: [],
-        mappings: [],
+        crmMappings: [],
+        unusedColumnActions: {},
         previewRows: [],
+        previewColumns: [],
         validation: { blocking: [], warnings: [] },
         importResult: null,
         isLoading: false
@@ -103,15 +107,11 @@
         <div class="import-flow">
           <div class="card">
             <h2>Bulk Import</h2>
-            <p>Upload a CSV file to import into <strong>${module.label}</strong>. Column mapping uses this sheet's headers automatically.</p>
+            <p>Upload a CSV file to import into <strong>${module.label}</strong>. You'll map imported columns onto your CRM fields.</p>
 
             <div class="field field--file">
               <label for="import-csv-file">CSV File</label>
-              <input
-                id="import-csv-file"
-                type="file"
-                accept=".csv,text/csv"
-              >
+              <input id="import-csv-file" type="file" accept=".csv,text/csv">
               <p class="field-hint">CSV only for now. Excel files are not supported yet.</p>
             </div>
 
@@ -122,24 +122,21 @@
     },
 
     renderMapping_() {
-      const mappedCount = this.state.mappings.filter((mapping) => !mapping.ignored && mapping.targetHeader).length;
-      const needsReview = this.state.mappings.filter(
-        (mapping) => !mapping.ignored && mapping.confidence !== 'exact' && mapping.confidence !== 'synonym'
-      ).length;
+      const mappedCount = this.state.crmMappings.filter((mapping) => mapping.csvHeader).length;
+      const unusedHeaders = this.getUnusedCsvHeaders_();
 
       return `
         <div class="import-flow">
           <div class="card">
-            <h2>Map Columns</h2>
-            <p>Review how CSV columns map to <strong>${this.state.schema.moduleLabel}</strong> fields. Adjust uncertain matches before importing.</p>
-            <p class="import-meta">${mappedCount} mapped · ${needsReview} need review · ${this.state.csvRows.length} rows</p>
+            <h2>Map to CRM Fields</h2>
+            <p>Match your uploaded CSV columns to <strong>${this.state.schema.moduleLabel}</strong> fields. Each CSV column can only be used once.</p>
+            <p class="import-meta">${mappedCount} of ${this.state.crmMappings.length} CRM fields mapped · ${this.state.csvRows.length} rows</p>
 
-            <div class="import-mapping-list">
-              ${this.state.mappings
-                .map((mapping, index) => this.renderMappingRow_(mapping, index))
-                .join('')}
+            <div class="import-dest-list">
+              ${this.state.crmMappings.map((mapping) => this.renderCrmMappingRow_(mapping)).join('')}
             </div>
 
+            ${this.renderUnusedColumnsSection_(unusedHeaders)}
             ${this.renderMappingIssues_()}
 
             <div class="import-actions">
@@ -151,38 +148,95 @@
       `;
     },
 
-    renderMappingRow_(mapping, index) {
-      const options = this.state.schema.columns
-        .map((column) => {
-          const selected = mapping.targetHeader === column.header ? 'selected' : '';
-          return `<option value="${this.escapeHtml_(column.header)}" ${selected}>${this.escapeHtml_(column.header)}</option>`;
+    renderCrmMappingRow_(mapping) {
+      const availableCsv = this.getAvailableCsvHeadersForField_(mapping.fieldKey);
+      const csvOptions = availableCsv
+        .map((csvHeader) => {
+          const selected = mapping.csvHeader === csvHeader ? 'selected' : '';
+          return `<option value="${this.escapeHtml_(csvHeader)}" ${selected}>${this.escapeHtml_(csvHeader)}</option>`;
         })
         .join('');
-
-      const confidenceClass = 'import-confidence import-confidence--' + (mapping.confidence || 'manual');
-      const confidenceLabel = this.getConfidenceLabel_(mapping);
+      const status = this.getCrmMappingStatus_(mapping);
+      const statusClass = 'import-status import-status--' + status.key;
+      const requiredLabel = mapping.required
+        ? '<span class="import-field-tag import-field-tag--required">Required</span>'
+        : '<span class="import-field-tag">Optional</span>';
 
       return `
-        <div class="import-mapping-row" data-mapping-index="${index}">
-          <div class="import-mapping-row__csv">
-            <span class="import-mapping-label">CSV column</span>
-            <strong>${this.escapeHtml_(mapping.csvHeader)}</strong>
+        <div class="import-dest-row">
+          <div class="import-dest-row__field">
+            <strong>${this.escapeHtml_(mapping.header)}</strong>
+            ${requiredLabel}
           </div>
 
-          <div class="import-mapping-row__target">
-            <label class="import-mapping-label" for="import-map-${index}">CRM field</label>
-            <select id="import-map-${index}" data-mapping-select="${index}" ${mapping.ignored ? 'disabled' : ''}>
-              <option value="">Ignore column</option>
-              ${options}
+          <div class="import-dest-row__select">
+            <label class="import-mapping-label" for="crm-map-${this.escapeHtml_(mapping.fieldKey)}">CSV column</label>
+            <select id="crm-map-${this.escapeHtml_(mapping.fieldKey)}" data-crm-map="${this.escapeHtml_(mapping.fieldKey)}">
+              <option value="">Not mapped</option>
+              ${csvOptions}
             </select>
           </div>
 
-          <div class="import-mapping-row__meta">
-            <span class="${confidenceClass}">${confidenceLabel}</span>
-            <label class="import-ignore-toggle">
-              <input type="checkbox" data-mapping-ignore="${index}" ${mapping.ignored ? 'checked' : ''}>
-              Ignore
-            </label>
+          <div class="import-dest-row__status">
+            <span class="${statusClass}">${status.label}</span>
+          </div>
+        </div>
+      `;
+    },
+
+    renderUnusedColumnsSection_(unusedHeaders) {
+      if (!unusedHeaders.length) {
+        return `
+          <div class="import-unused-section">
+            <h3>Unused Imported Columns</h3>
+            <p class="status">All imported columns are mapped to CRM fields.</p>
+          </div>
+        `;
+      }
+
+      const rows = unusedHeaders
+        .map((csvHeader) => this.renderUnusedColumnRow_(csvHeader))
+        .join('');
+
+      return `
+        <div class="import-unused-section">
+          <h3>Unused Imported Columns</h3>
+          <p class="field-hint">These CSV columns are not mapped to CRM fields. Ignore them or create new custom fields.</p>
+          <div class="import-unused-list">${rows}</div>
+        </div>
+      `;
+    },
+
+    renderUnusedColumnRow_(csvHeader) {
+      const action = this.state.unusedColumnActions[csvHeader] || {
+        action: 'ignore',
+        customFieldName: csvHeader
+      };
+      const showCustomInput = action.action === 'custom';
+
+      return `
+        <div class="import-unused-row">
+          <div class="import-unused-row__name">
+            <span class="import-mapping-label">CSV column</span>
+            <strong>${this.escapeHtml_(csvHeader)}</strong>
+          </div>
+
+          <div class="import-unused-row__action">
+            <label class="import-mapping-label" for="unused-action-${this.escapeHtml_(csvHeader)}">Action</label>
+            <select id="unused-action-${this.escapeHtml_(csvHeader)}" data-unused-action="${this.escapeHtml_(csvHeader)}">
+              <option value="ignore" ${action.action === 'ignore' ? 'selected' : ''}>Ignore</option>
+              <option value="custom" ${action.action === 'custom' ? 'selected' : ''}>Create custom field</option>
+            </select>
+          </div>
+
+          <div class="import-unused-row__custom" ${showCustomInput ? '' : 'hidden'}>
+            <label class="import-mapping-label" for="unused-custom-${this.escapeHtml_(csvHeader)}">Custom field name</label>
+            <input
+              id="unused-custom-${this.escapeHtml_(csvHeader)}"
+              type="text"
+              data-unused-custom="${this.escapeHtml_(csvHeader)}"
+              value="${this.escapeHtml_(action.customFieldName || csvHeader)}"
+            >
           </div>
         </div>
       `;
@@ -211,13 +265,17 @@
     },
 
     renderPreview_() {
-      const previewColumns = this.getPreviewColumns_();
+      const previewColumns = this.state.previewColumns;
       const issues = this.state.validation;
       const canImport = issues.blocking.length === 0 && this.state.previewRows.length > 0;
       const previewLimit = Math.min(this.state.previewRows.length, 25);
+      const customCount = previewColumns.filter((column) => column.isCustom).length;
 
       const headerCells = previewColumns
-        .map((column) => `<th>${this.escapeHtml_(column.header)}</th>`)
+        .map((column) => {
+          const suffix = column.isCustom ? ' <span class="import-preview-tag">New</span>' : '';
+          return `<th>${this.escapeHtml_(column.header)}${suffix}</th>`;
+        })
         .join('');
 
       const bodyRows = this.state.previewRows
@@ -225,7 +283,7 @@
         .map((row, rowIndex) => {
           const cells = previewColumns
             .map((column) => {
-              const value = row[column.fieldKey];
+              const value = this.getPreviewCellValue_(row, column);
               const display = value === undefined || value === null ? '' : String(value);
               const hasError = issues.blocking.some(
                 (issue) => issue.row === rowIndex + 1 && issue.field === column.header
@@ -241,17 +299,17 @@
 
       const blocking = issues.blocking
         .slice(0, 12)
-        .map(
-          (issue) =>
-            `<li class="import-issue import-issue--error">Row ${issue.row}, ${this.escapeHtml_(issue.field)}: ${this.escapeHtml_(issue.message)}</li>`
-        )
+        .map((issue) => {
+          const prefix = issue.row ? 'Row ' + issue.row + ', ' : '';
+          return `<li class="import-issue import-issue--error">${prefix}${this.escapeHtml_(issue.field)}: ${this.escapeHtml_(issue.message)}</li>`;
+        })
         .join('');
 
       return `
         <div class="import-flow">
           <div class="card">
             <h2>Preview Import</h2>
-            <p class="import-meta">${this.state.previewRows.length} rows ready · ${previewColumns.length} CRM fields mapped</p>
+            <p class="import-meta">${this.state.previewRows.length} rows · ${previewColumns.length} columns${customCount ? ' · ' + customCount + ' new custom field(s)' : ''}</p>
 
             ${issues.blocking.length ? `<ul class="import-issue-list">${blocking}</ul>` : '<p class="status">All mapped rows passed validation.</p>'}
 
@@ -300,18 +358,29 @@
         });
       }
 
-      root.querySelectorAll('[data-mapping-select]').forEach((select) => {
+      root.querySelectorAll('[data-crm-map]').forEach((select) => {
         select.addEventListener('change', (event) => {
-          const index = Number(event.target.getAttribute('data-mapping-select'));
-          this.updateMappingTarget_(index, event.target.value);
+          this.updateCrmMapping_(event.target.getAttribute('data-crm-map'), event.target.value);
+          this.syncUnusedColumns_();
           this.render(root);
         });
       });
 
-      root.querySelectorAll('[data-mapping-ignore]').forEach((checkbox) => {
-        checkbox.addEventListener('change', (event) => {
-          const index = Number(event.target.getAttribute('data-mapping-ignore'));
-          this.updateMappingIgnored_(index, event.target.checked);
+      root.querySelectorAll('[data-unused-action]').forEach((select) => {
+        select.addEventListener('change', (event) => {
+          const csvHeader = event.target.getAttribute('data-unused-action');
+          this.updateUnusedAction_(csvHeader, event.target.value);
+          this.render(root);
+        });
+      });
+
+      root.querySelectorAll('[data-unused-custom]').forEach((input) => {
+        input.addEventListener('input', (event) => {
+          const csvHeader = event.target.getAttribute('data-unused-custom');
+          this.updateUnusedCustomName_(csvHeader, event.target.value);
+        });
+
+        input.addEventListener('blur', () => {
           this.render(root);
         });
       });
@@ -371,10 +440,13 @@
       reader.onload = () => {
         try {
           const parsed = this.parseCsv_(String(reader.result || ''));
+          const mapped = this.autoMapDestinationFirst_(parsed.headers, this.state.schema);
+
           this.state.fileName = file.name;
           this.state.csvHeaders = parsed.headers;
           this.state.csvRows = parsed.rows;
-          this.state.mappings = this.autoMapColumns_(parsed.headers, this.state.schema);
+          this.state.crmMappings = mapped.crmMappings;
+          this.state.unusedColumnActions = mapped.unusedColumnActions;
           this.state.step = 'mapping';
           this.render(root);
         } catch (error) {
@@ -389,46 +461,176 @@
       reader.readAsText(file);
     },
 
-    updateMappingTarget_(index, targetHeader) {
-      const mapping = this.state.mappings[index];
+    updateCrmMapping_(fieldKey, csvHeader) {
+      const mapping = this.state.crmMappings.find((item) => item.fieldKey === fieldKey);
 
       if (!mapping) {
         return;
       }
 
-      mapping.targetHeader = targetHeader;
-      mapping.fieldKey = this.getFieldKeyForHeader_(targetHeader);
-      mapping.ignored = !targetHeader;
-      mapping.confidence = targetHeader ? 'manual' : 'ignored';
+      const previousCsv = mapping.csvHeader;
+      mapping.csvHeader = csvHeader;
+
+      if (!csvHeader) {
+        mapping.confidence = 'none';
+      } else if (csvHeader !== previousCsv) {
+        mapping.confidence = 'manual';
+      }
     },
 
-    updateMappingIgnored_(index, ignored) {
-      const mapping = this.state.mappings[index];
+    updateUnusedAction_(csvHeader, action) {
+      const current = this.state.unusedColumnActions[csvHeader] || {
+        action: 'ignore',
+        customFieldName: csvHeader
+      };
 
-      if (!mapping) {
-        return;
+      current.action = action;
+
+      if (action === 'custom' && !current.customFieldName) {
+        current.customFieldName = csvHeader;
       }
 
-      mapping.ignored = ignored;
+      this.state.unusedColumnActions[csvHeader] = current;
+    },
 
-      if (ignored) {
-        mapping.targetHeader = '';
-        mapping.fieldKey = '';
-        mapping.confidence = 'ignored';
+    updateUnusedCustomName_(csvHeader, name) {
+      const current = this.state.unusedColumnActions[csvHeader] || {
+        action: 'custom',
+        customFieldName: csvHeader
+      };
+
+      current.action = 'custom';
+      current.customFieldName = name;
+      this.state.unusedColumnActions[csvHeader] = current;
+    },
+
+    syncUnusedColumns_() {
+      const mappedCsv = {};
+      const nextUnused = {};
+
+      this.state.crmMappings.forEach((mapping) => {
+        if (mapping.csvHeader) {
+          mappedCsv[mapping.csvHeader] = true;
+        }
+      });
+
+      this.state.csvHeaders.forEach((csvHeader) => {
+        if (mappedCsv[csvHeader]) {
+          return;
+        }
+
+        const existing = this.state.unusedColumnActions[csvHeader];
+        nextUnused[csvHeader] = existing || {
+          action: 'ignore',
+          customFieldName: csvHeader
+        };
+      });
+
+      this.state.unusedColumnActions = nextUnused;
+    },
+
+    getUsedCsvHeaders_(excludeFieldKey) {
+      const used = {};
+
+      this.state.crmMappings.forEach((mapping) => {
+        if (!mapping.csvHeader || mapping.fieldKey === excludeFieldKey) {
+          return;
+        }
+
+        used[mapping.csvHeader] = true;
+      });
+
+      Object.keys(this.state.unusedColumnActions).forEach((csvHeader) => {
+        const action = this.state.unusedColumnActions[csvHeader];
+
+        if (action && action.action === 'custom') {
+          used[csvHeader] = true;
+        }
+      });
+
+      return used;
+    },
+
+    getAvailableCsvHeadersForField_(fieldKey) {
+      const used = this.getUsedCsvHeaders_(fieldKey);
+      const current = this.state.crmMappings.find((mapping) => mapping.fieldKey === fieldKey);
+
+      return this.state.csvHeaders.filter((csvHeader) => {
+        if (current && current.csvHeader === csvHeader) {
+          return true;
+        }
+
+        return !used[csvHeader];
+      });
+    },
+
+    getUnusedCsvHeaders_() {
+      const mappedCsv = {};
+
+      this.state.crmMappings.forEach((mapping) => {
+        if (mapping.csvHeader) {
+          mappedCsv[mapping.csvHeader] = true;
+        }
+      });
+
+      return this.state.csvHeaders.filter((csvHeader) => !mappedCsv[csvHeader]);
+    },
+
+    getCrmMappingStatus_(mapping) {
+      if (!mapping.csvHeader) {
+        return { key: 'none', label: 'Not mapped' };
       }
+
+      if (
+        mapping.confidence === 'exact' ||
+        mapping.confidence === 'synonym' ||
+        mapping.confidence === 'contains' ||
+        mapping.confidence === 'fuzzy'
+      ) {
+        return { key: 'auto', label: 'Auto-mapped' };
+      }
+
+      return { key: 'mapped', label: 'Mapped' };
+    },
+
+    getExistingHeaderNames_() {
+      return this.state.schema.columns.reduce((acc, column) => {
+        acc[column.header.toLowerCase()] = column.header;
+        return acc;
+      }, {});
     },
 
     buildPreview_() {
-      const activeMappings = this.state.mappings.filter(
-        (mapping) => !mapping.ignored && mapping.targetHeader
-      );
-
+      this.state.previewColumns = this.getPreviewColumns_();
       this.state.previewRows = this.state.csvRows.map((row) => {
-        const record = {};
+        const record = { customFields: {} };
 
-        activeMappings.forEach((mapping) => {
+        this.state.crmMappings.forEach((mapping) => {
+          if (!mapping.csvHeader) {
+            return;
+          }
+
           const value = row[mapping.csvHeader];
-          record[mapping.fieldKey] = value === undefined || value === null ? '' : String(value).trim();
+          record[mapping.fieldKey] =
+            value === undefined || value === null ? '' : String(value).trim();
+        });
+
+        Object.keys(this.state.unusedColumnActions).forEach((csvHeader) => {
+          const action = this.state.unusedColumnActions[csvHeader];
+
+          if (!action || action.action !== 'custom') {
+            return;
+          }
+
+          const customName = String(action.customFieldName || '').trim();
+
+          if (!customName) {
+            return;
+          }
+
+          const value = row[csvHeader];
+          record.customFields[customName] =
+            value === undefined || value === null ? '' : String(value).trim();
         });
 
         return record;
@@ -442,11 +644,14 @@
       const warnings = [];
       const mappingIssues = this.getMappingValidation_();
 
-      blocking.push.apply(blocking, mappingIssues.blocking.map((message) => ({
-        row: 0,
-        field: 'Mapping',
-        message: message
-      })));
+      blocking.push.apply(
+        blocking,
+        mappingIssues.blocking.map((message) => ({
+          row: 0,
+          field: 'Mapping',
+          message: message
+        }))
+      );
       warnings.push.apply(warnings, mappingIssues.warnings);
 
       const columnsByKey = this.state.schema.columns.reduce((acc, column) => {
@@ -455,21 +660,25 @@
       }, {});
 
       this.state.previewRows.forEach((record, rowIndex) => {
-        this.state.schema.columns.forEach((column) => {
-          if (!column.required) {
+        this.state.crmMappings.forEach((mapping) => {
+          if (!mapping.required || !mapping.csvHeader) {
             return;
           }
 
-          if (!String(record[column.fieldKey] || '').trim()) {
+          if (!String(record[mapping.fieldKey] || '').trim()) {
             blocking.push({
               row: rowIndex + 1,
-              field: column.header,
-              message: column.header + ' is required.'
+              field: mapping.header,
+              message: mapping.header + ' is required.'
             });
           }
         });
 
         Object.keys(record).forEach((fieldKey) => {
+          if (fieldKey === 'customFields') {
+            return;
+          }
+
           const column = columnsByKey[fieldKey];
           const value = record[fieldKey];
 
@@ -517,61 +726,153 @@
     getMappingValidation_() {
       const blocking = [];
       const warnings = [];
-      const usedTargets = {};
-      const mappedFieldKeys = {};
+      const usedCsvHeaders = {};
+      const usedCustomNames = {};
+      const existingHeaders = this.getExistingHeaderNames_();
 
-      this.state.mappings.forEach((mapping) => {
-        if (mapping.ignored || !mapping.targetHeader) {
+      this.state.crmMappings.forEach((mapping) => {
+        if (!mapping.csvHeader) {
           return;
         }
 
-        if (usedTargets[mapping.targetHeader]) {
-          blocking.push('Duplicate mapping: multiple CSV columns map to ' + mapping.targetHeader + '.');
+        if (usedCsvHeaders[mapping.csvHeader]) {
+          blocking.push(
+            'Duplicate mapping: CSV column "' + mapping.csvHeader + '" is mapped more than once.'
+          );
         }
 
-        usedTargets[mapping.targetHeader] = true;
-        mappedFieldKeys[mapping.fieldKey] = true;
-      });
-
-      this.state.schema.columns.forEach((column) => {
-        if (column.required && !mappedFieldKeys[column.fieldKey]) {
-          blocking.push('Required field "' + column.header + '" is not mapped.');
-        }
-      });
-
-      this.state.mappings.forEach((mapping) => {
-        if (mapping.ignored) {
-          return;
-        }
+        usedCsvHeaders[mapping.csvHeader] = true;
 
         if (mapping.confidence === 'fuzzy' || mapping.confidence === 'contains') {
-          warnings.push('Review mapping for "' + mapping.csvHeader + '" → ' + mapping.targetHeader + '.');
+          warnings.push('Review mapping for ' + mapping.header + ' ← ' + mapping.csvHeader + '.');
         }
+      });
+
+      this.state.crmMappings.forEach((mapping) => {
+        if (mapping.required && !mapping.csvHeader) {
+          blocking.push('Required field "' + mapping.header + '" is not mapped.');
+        }
+      });
+
+      Object.keys(this.state.unusedColumnActions).forEach((csvHeader) => {
+        const action = this.state.unusedColumnActions[csvHeader];
+
+        if (!action || action.action !== 'custom') {
+          return;
+        }
+
+        const customName = String(action.customFieldName || '').trim();
+        const normalized = customName.toLowerCase();
+
+        if (!customName) {
+          blocking.push('Custom field name is required for CSV column "' + csvHeader + '".');
+          return;
+        }
+
+        if (existingHeaders[normalized]) {
+          blocking.push(
+            'Custom field "' + customName + '" matches an existing CRM field. Map "' + csvHeader + '" to that field instead.'
+          );
+        }
+
+        if (usedCustomNames[normalized]) {
+          blocking.push('Duplicate custom field name: "' + customName + '".');
+        }
+
+        usedCustomNames[normalized] = true;
+        warnings.push('New custom field "' + customName + '" will be added to the sheet.');
       });
 
       return { blocking: blocking, warnings: warnings };
     },
 
     getPreviewColumns_() {
-      const keys = [];
+      const columns = [];
 
-      return this.state.schema.columns.filter((column) => {
-        const isMapped = this.state.mappings.some(
-          (mapping) => !mapping.ignored && mapping.fieldKey === column.fieldKey
-        );
-
-        if (!isMapped || keys.indexOf(column.fieldKey) !== -1) {
-          return false;
+      this.state.crmMappings.forEach((mapping) => {
+        if (!mapping.csvHeader) {
+          return;
         }
 
-        keys.push(column.fieldKey);
-        return true;
+        columns.push({
+          header: mapping.header,
+          fieldKey: mapping.fieldKey,
+          isCustom: false
+        });
       });
+
+      Object.keys(this.state.unusedColumnActions).forEach((csvHeader) => {
+        const action = this.state.unusedColumnActions[csvHeader];
+
+        if (!action || action.action !== 'custom') {
+          return;
+        }
+
+        const customName = String(action.customFieldName || '').trim();
+
+        if (!customName) {
+          return;
+        }
+
+        columns.push({
+          header: customName,
+          fieldKey: null,
+          isCustom: true
+        });
+      });
+
+      return columns;
+    },
+
+    getPreviewCellValue_(row, column) {
+      if (column.isCustom) {
+        return row.customFields ? row.customFields[column.header] : '';
+      }
+
+      return row[column.fieldKey];
+    },
+
+    getImportPayload_() {
+      const customFieldHeaders = [];
+      const customSeen = {};
+
+      Object.keys(this.state.unusedColumnActions).forEach((csvHeader) => {
+        const action = this.state.unusedColumnActions[csvHeader];
+
+        if (!action || action.action !== 'custom') {
+          return;
+        }
+
+        const name = String(action.customFieldName || '').trim();
+
+        if (name && !customSeen[name.toLowerCase()]) {
+          customSeen[name.toLowerCase()] = true;
+          customFieldHeaders.push(name);
+        }
+      });
+
+      return {
+        records: this.state.previewRows,
+        customFieldHeaders: customFieldHeaders
+      };
     },
 
     runImport_(root) {
       const module = AppStore.getModule();
       const confirmButton = root.querySelector('[data-import-action="confirm"]');
+      const payload = this.getImportPayload_();
+      const duplicateCheck = this.getMappingValidation_();
+
+      if (duplicateCheck.blocking.length) {
+        Toast.show(duplicateCheck.blocking[0], 'error');
+        this.state.validation.blocking = duplicateCheck.blocking.map((message) => ({
+          row: 0,
+          field: 'Mapping',
+          message: message
+        }));
+        this.render(root);
+        return;
+      }
 
       if (confirmButton) {
         confirmButton.disabled = true;
@@ -596,60 +897,70 @@
           Toast.show(error.message, 'error');
           this.render(root);
         })
-        .importModuleRecords(module.id, this.state.previewRows);
+        .importModuleRecords(module.id, payload);
     },
 
-    autoMapColumns_(csvHeaders, schema) {
-      const candidates = [];
-      const usedTargets = {};
+    autoMapDestinationFirst_(csvHeaders, schema) {
+      const usedCsv = {};
+      const crmMappings = schema.columns.map((column) => {
+        let best = { csvHeader: '', score: 0, confidence: 'none' };
+
+        csvHeaders.forEach((csvHeader) => {
+          if (usedCsv[csvHeader]) {
+            return;
+          }
+
+          const match = this.scoreHeaderMatch_(
+            csvHeader,
+            column,
+            schema.synonyms[column.fieldKey] || []
+          );
+
+          if (match.score > best.score) {
+            best = {
+              csvHeader: csvHeader,
+              score: match.score,
+              confidence: match.confidence
+            };
+          }
+        });
+
+        if (best.csvHeader && best.score >= 60) {
+          usedCsv[best.csvHeader] = true;
+
+          return {
+            fieldKey: column.fieldKey,
+            header: column.header,
+            required: column.required,
+            csvHeader: best.csvHeader,
+            confidence: best.confidence
+          };
+        }
+
+        return {
+          fieldKey: column.fieldKey,
+          header: column.header,
+          required: column.required,
+          csvHeader: '',
+          confidence: 'none'
+        };
+      });
+
+      const unusedColumnActions = {};
 
       csvHeaders.forEach((csvHeader) => {
-        schema.columns.forEach((column) => {
-          const match = this.scoreHeaderMatch_(csvHeader, column, schema.synonyms[column.fieldKey] || []);
-          candidates.push({
-            csvHeader: csvHeader,
-            targetHeader: column.header,
-            fieldKey: column.fieldKey,
-            confidence: match.confidence,
-            score: match.score
-          });
-        });
-      });
-
-      candidates.sort((a, b) => b.score - a.score);
-
-      const mappingByCsv = {};
-
-      candidates.forEach((candidate) => {
-        if (mappingByCsv[candidate.csvHeader] || usedTargets[candidate.targetHeader]) {
-          return;
+        if (!usedCsv[csvHeader]) {
+          unusedColumnActions[csvHeader] = {
+            action: 'ignore',
+            customFieldName: csvHeader
+          };
         }
-
-        if (candidate.score < 60) {
-          return;
-        }
-
-        mappingByCsv[candidate.csvHeader] = {
-          csvHeader: candidate.csvHeader,
-          targetHeader: candidate.targetHeader,
-          fieldKey: candidate.fieldKey,
-          confidence: candidate.confidence,
-          ignored: false
-        };
-        usedTargets[candidate.targetHeader] = true;
       });
 
-      return csvHeaders.map((csvHeader) => {
-        return (
-          mappingByCsv[csvHeader] || {
-            csvHeader: csvHeader,
-            targetHeader: '',
-            fieldKey: '',
-            confidence: 'none',
-            ignored: false
-          }
-        );
-      });
+      return {
+        crmMappings: crmMappings,
+        unusedColumnActions: unusedColumnActions
+      };
     },
 
     scoreHeaderMatch_(csvHeader, column, synonyms) {
@@ -672,11 +983,11 @@
         return { score: 92, confidence: 'synonym' };
       }
 
-      if (csvNorm.indexOf(headerNorm) !== -1 || headerNorm.indexOf(csvNorm) !== -1) {
+      if (this.isValidContainsMatch_(csvNorm, headerNorm) || this.isValidContainsMatch_(headerNorm, csvNorm)) {
         return { score: 78, confidence: 'contains' };
       }
 
-      if (csvNorm.indexOf(labelNorm) !== -1 || labelNorm.indexOf(csvNorm) !== -1) {
+      if (this.isValidContainsMatch_(csvNorm, labelNorm) || this.isValidContainsMatch_(labelNorm, csvNorm)) {
         return { score: 74, confidence: 'contains' };
       }
 
@@ -690,11 +1001,36 @@
         }
       });
 
-      if (bestRatio >= 0.82) {
+      if (this.canUseFuzzyMatch_(csvNorm) && bestRatio >= 0.82) {
         return { score: Math.round(bestRatio * 90), confidence: 'fuzzy' };
       }
 
       return { score: 0, confidence: 'none' };
+    },
+
+    isValidContainsMatch_(needle, haystack) {
+      if (!needle || !haystack || needle === haystack) {
+        return false;
+      }
+
+      if (needle.length < 3) {
+        return false;
+      }
+
+      if (haystack.indexOf(needle) === -1) {
+        return false;
+      }
+
+      const pattern = new RegExp('(^|\\s)' + this.escapeRegExp_(needle) + '(\\s|$)');
+      return pattern.test(haystack);
+    },
+
+    canUseFuzzyMatch_(value) {
+      return String(value || '').trim().length >= 3;
+    },
+
+    escapeRegExp_(value) {
+      return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     },
 
     normalizeHeader_(value) {
@@ -861,32 +1197,6 @@
       });
 
       return { headers: headers, rows: dataRows };
-    },
-
-    getFieldKeyForHeader_(header) {
-      const column = this.state.schema.columns.find((item) => item.header === header);
-      return column ? column.fieldKey : '';
-    },
-
-    getConfidenceLabel_(mapping) {
-      if (mapping.ignored || mapping.confidence === 'ignored') {
-        return 'Ignored';
-      }
-
-      if (!mapping.targetHeader) {
-        return 'Unmapped';
-      }
-
-      const labels = {
-        exact: 'Exact match',
-        synonym: 'Synonym match',
-        contains: 'Likely match',
-        fuzzy: 'Fuzzy match',
-        manual: 'Manual mapping',
-        none: 'Needs review'
-      };
-
-      return labels[mapping.confidence] || 'Needs review';
     },
 
     escapeHtml_(value) {
